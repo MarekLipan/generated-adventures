@@ -1,6 +1,10 @@
 # generated-adventures
 A Python app for generating short D&amp;D like adventures with generated story, voice narration and imagery using Multimodal LLMs.
 
+### How to Run
+1. ``uv run uvicorn webapp.main:app --reload`` for playing the game.
+2. ``SHOW_DM_NOTES=1 uv run uvicorn webapp.main:app --reload`` for playing the game with DM notes visible.
+
 ### App Flow
 1. User is prompted to enter a how many players will be playing the adventure.
 2. User is prompted to select out of 3 generated fantasy adventure scenarios.
