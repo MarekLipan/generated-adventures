@@ -26,6 +26,23 @@ class Character(BaseModel):
     )
 
 
+class Scene(BaseModel):
+    """Represents a scene in the game, which can be expanded later."""
+
+    id: int = Field(
+        ..., description="Unique integer ID for the scene, ordered by creation"
+    )
+    text: str = Field(
+        ..., description="Text content of the scene, can be markdown formatted"
+    )
+    image_path: Optional[str] = Field(
+        None, description="Path to an image representing the scene"
+    )
+    voiceover_path: Optional[str] = Field(
+        None, description="Path to a voiceover file for the scene"
+    )
+
+
 class Game(BaseModel):
     """Represents the entire state of a single game instance."""
 
@@ -36,4 +53,5 @@ class Game(BaseModel):
     scenario_name: Optional[str] = None
     characters: List[Character] = []
     scenario_details: Optional[str] = None
-    # scenes: List[Scene] = [] # A placeholder for future scene management
+    scenes: List[Scene] = []
+    player_actions: List[str] = []

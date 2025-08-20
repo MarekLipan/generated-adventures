@@ -1,11 +1,17 @@
 """
 Handles content generation via external APIs.
+
+This file currently contains placeholder deterministic generators. Replace
+these with real model calls (Gemini, OpenAI, etc.) later.
 """
+
+from typing import Optional
+from core.models import Scene
 
 
 def generate_scenarios() -> list[str]:
     """Calls an external service to generate scenarios."""
-    # In a real app, you would call Gemini here
+    # In a real app, call your LLM here.
     return [
         "Rescue in Frostvale",
         "Siege of Emberhold",
@@ -15,32 +21,74 @@ def generate_scenarios() -> list[str]:
 
 def generate_characters() -> list[str]:
     """Calls an external service to generate characters."""
-    # In a real app, you would call Gemini here
-    return ["Thalion the Ranger", "Mira the Mage", "Gruk the Barbarian"]
+    # In a real app, call your LLM here.
+    return [
+        "Thalion the Ranger",
+        "Mira the Mage",
+        "Gruk the Barbarian",
+        "Elowen the Druid",
+        "Sera the Rogue",
+        "Borin the Cleric",
+    ]
 
 
 def generate_scenario_details(scenario_name: str) -> str:
-    """Generates the detailed story for the selected scenario."""
-    # In a real app, you would make a detailed call to Gemini or another model here.
-    # This placeholder returns markdown-formatted story content.
+    """Generates the detailed story for the selected scenario.
+
+    Returns a markdown string intended for DM notes.
+    """
     return f"""
 # {scenario_name}
 
 ## The Setting
-A realm shrouded in an unnatural, perpetual twilight. The towering peaks of the Dragon's Tooth mountains loom over the land, their shadows hiding ancient secrets and forgotten paths. The once-vibrant forests are now twisted and silent, and the rivers run sluggishly with dark, cold water.
+Twilight and cold creep across the land. Strange omens and ruined watchtowers dot the roads.
 
 ## The Plot
-The legendary Sunstone, the only source of light and warmth for the kingdom of Eldoria, has been stolen by the shadowy Sorcerer Malakor. Without it, the land is succumbing to a creeping, life-draining cold. Malakor plans to use the Sunstone's power to plunge the world into eternal darkness and rule over a kingdom of shadows.
+The party must recover the Sunstone from the Sorcerer Malakor before the land freezes over.
 
 ## Main Quest
-The heroes must journey to Malakor's fortress, the Obsidian Spire, which lies deep within the treacherous Shadowfen Marshes. They must navigate the dangers of the corrupted land, overcome Malakor's minions, and retrieve the Sunstone before the last light in Eldoria is extinguished forever.
+Journey to the Obsidian Spire, confront Malakor, and retrieve the Sunstone.
 
 ## Important NPCs
-- **Elara, the Seer**: An old, blind woman who can guide the party with her visions, but her help comes at a price.
-- **Garrick, the Disgraced Knight**: A former royal guard exiled for a crime he did not commit. He seeks redemption and knows a secret path to the Obsidian Spire.
+- **Elara, the Seer** – offers visions.
+- **Garrick, the Disgraced Knight** – knows a hidden pass.
 
-## Key Locations
-- **The Whispering Village**: A settlement on the edge of the Shadowfen Marshes, where the locals are paralyzed by fear and suspicion.
-- **The Sunken Temple**: An ancient ruin submerged in the marsh, holding a clue to Malakor's weakness.
-- **The Obsidian Spire**: Malakor's dark fortress, a twisted tower of black glass that seems to absorb the very light around it.
 """
+
+
+def _make_scene(scene_id: int, title: str, body: str) -> Scene:
+    text = f"## Scene {scene_id}: {title}\n\n{body}"
+    return Scene(id=scene_id, text=text)
+
+
+def generate_opening_scene(scenario_name: str, scene_id: int = 1) -> Scene:
+    """Generate the opening scene for the chosen scenario.
+
+    Placeholder implementation returns a short description. Replace with
+    LLM-driven content later.
+    """
+    title = f"Opening of {scenario_name}"
+    body = (
+        "The party gathers at the edge of the Whispering Village as dusk falls. "
+        "Smoke rises in the distance and villagers whisper of shadows moving in the marshes."
+    )
+    return _make_scene(scene_id, title, body)
+
+
+def generate_next_scene(
+    scenario_name: str, last_scene_id: int, player_action: Optional[str]
+) -> Scene:
+    """Generate the next scene based on the last scene and a player action.
+
+    This placeholder just increments the scene id and produces a canned
+    continuation. A real implementation would use the scenario, scene history,
+    and the player's action to generate a coherent next scene.
+    """
+    next_id = last_scene_id + 1
+    title = f"Aftermath {next_id}"
+    action_line = f"The party's action: '{player_action}'.\n\n" if player_action else ""
+    body = (
+        action_line
+        + "The party moves deeper into the marsh. Strange lights dance between the twisted trees and a distant tower gleams black against the sky."
+    )
+    return _make_scene(next_id, title, body)

@@ -24,14 +24,39 @@ def main_page():
                 for scenario in scenarios:
                     ui.button(
                         scenario,
-                        on_click=lambda _event=None, s=scenario: show_characters(
+                        on_click=lambda _event=None, s=scenario: handle_scenario_selection(
                             game_id, s
                         ),
                     )
 
+    def handle_scenario_selection(game_id: str, scenario_name: str):
+        """Handles scenario selection, generates story, then proceeds to character selection."""
+        game.select_scenario_for_game(game_id, scenario_name)
+        game.generate_and_set_scenario_details(game_id)
+
+        if os.getenv("SHOW_DM_NOTES", "0") == "1":
+            show_dm_notes_before_characters(game_id, scenario_name)
+        else:
+            show_characters(game_id, scenario_name)
+
+    def show_dm_notes_before_characters(game_id: str, scenario_name: str):
+        """Displays DM notes and then a button to proceed to character selection."""
+        main_container.clear()
+        game_state = game.get_game_state(game_id)
+        if not game_state or not game_state.scenario_details:
+            # Fallback if something went wrong
+            show_characters(game_id, scenario_name)
+            return
+
+        with main_container:
+            ui.markdown(game_state.scenario_details).classes("w-full text-left")
+            ui.button(
+                "Continue to Character Selection",
+                on_click=lambda: show_characters(game_id, scenario_name),
+            ).classes("mt-4")
+
     def show_characters(game_id: str, scenario_name: str):
         """Clears UI and shows character selection, tracking selected characters."""
-        game.select_scenario_for_game(game_id, scenario_name)
         game_state = game.get_game_state(game_id)
         if not game_state:
             return  # Or handle error
@@ -97,32 +122,43 @@ def main_page():
             # This button will eventually trigger the first game scene.
 
     def start_adventure(game_id: str):
-        """Generates the story and displays it.
+        """Start the interactive scene loop: render current scene and prompt action."""
 
-        DM-only notes (game_state.scenario_details) are only rendered when the
-        environment variable SHOW_DM_NOTES is set to "1". Otherwise a generic
-        player-facing message is shown.
-        """
-        game.generate_and_set_scenario_details(game_id)
-        game_state = game.get_game_state(game_id)
-        if not game_state:
-            return
+        def render_scene(scene):
+            main_container.clear()
+            with main_container:
+                ui.label(f"Scene {scene.id}").classes("text-h5")
+                ui.markdown(scene.text).classes("w-full text-left")
 
-        main_container.clear()
-        with main_container:
-            if os.getenv("SHOW_DM_NOTES", "0") == "1":
-                # Render full DM notes (markdown)
-                if game_state.scenario_details:
-                    ui.markdown(game_state.scenario_details).classes("w-full text-left")
-                else:
-                    ui.label("No scenario details available.")
-            else:
-                # Player-facing minimal view
-                ui.label("The adventure has begun! DM notes are hidden.").classes(
-                    "text-h5"
+                # Action input
+                action_input = ui.input(
+                    label="Your action", placeholder="What does your party do?"
                 )
-                if game_state.scenario_name:
-                    ui.label(f"Scenario: {game_state.scenario_name}")
+
+                def on_submit(_event=None):
+                    player_action = action_input.value
+                    # Advance scene and re-render
+                    next_scene = game.advance_scene(game_id, player_action)
+                    if next_scene:
+                        render_scene(next_scene)
+                    else:
+                        ui.label("No further scenes.")
+
+                ui.button("Submit Action", on_click=on_submit).classes("mt-4")
+
+        # Render the current scene (should exist because generate_and_set_scenario_details
+        # created the opening scene). If not present, attempt to generate.
+        current = game.get_current_scene(game_id)
+        if not current:
+            # try to generate initial details and scene
+            game.generate_and_set_scenario_details(game_id)
+            current = game.get_current_scene(game_id)
+
+        if current:
+            render_scene(current)
+        else:
+            main_container.clear()
+            ui.label("Unable to start the adventure: no scene available.")
 
     async def new_game_dialog():
         """Shows a dialog to start a new game."""
