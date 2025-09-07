@@ -14,9 +14,9 @@ def main_page():
     ui.label("Generated Adventures").classes("text-h2 text-primary")
     main_container = ui.column().classes("w-full items-center")
 
-    def show_scenarios(game_id: str):
+    async def show_scenarios(game_id: str):
         """Clears UI and shows scenario selection."""
-        scenarios = generator.generate_scenarios()
+        scenarios = await generator.generate_scenarios()
         main_container.clear()
         with main_container:
             ui.label("Choose a Scenario").classes("text-h4")
@@ -174,7 +174,7 @@ def main_page():
         num_players = await dialog
         if num_players:
             game_id = game.create_new_game(num_players)
-            show_scenarios(game_id)
+            await show_scenarios(game_id)
 
     with main_container:
         ui.button("New Game", on_click=new_game_dialog).classes("text-lg")

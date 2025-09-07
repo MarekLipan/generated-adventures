@@ -5,18 +5,35 @@ This file currently contains placeholder deterministic generators. Replace
 these with real model calls (Gemini, OpenAI, etc.) later.
 """
 
-from typing import Optional
+from pydantic_ai import Agent
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.providers.google import GoogleProvider
+from pydantic import BaseModel, Field
+
+from typing import Optional, List
 from core.models import Scene
+from core.config import settings
 
 
-def generate_scenarios() -> list[str]:
-    """Calls an external service to generate scenarios."""
-    # In a real app, call your LLM here.
-    return [
-        "Rescue in Frostvale",
-        "Siege of Emberhold",
-        "The Lost Tomb of Varaxis",
-    ]
+class GeneratedScenarios(BaseModel):
+    """Represents the list of generated scenarios."""
+
+    scenarios: List[str] = Field(
+        ..., description="List of three distinct fantasy adventure scenarios"
+    )
+
+
+async def generate_scenarios() -> list[str]:
+    """Calls Google Gemini to generate scenarios."""
+    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    agent = Agent(model=model, output_type=GeneratedScenarios)
+
+    result = await agent.run(
+        "Generate three distinct fantasy adventure scenarios. Provide only the names.",
+    )
+
+    return result.output.scenarios
 
 
 def generate_characters() -> list[str]:
