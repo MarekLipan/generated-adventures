@@ -27,39 +27,29 @@ def select_scenario_for_game(game_id: str, scenario_name: str):
         games[game_id].scenario_name = scenario_name
 
 
-def add_character_to_game(game_id: str, character_name: str):
+def add_character_to_game(game_id: str, character: Character):
     """Adds a new character to the game state."""
     if game_id in games:
-        # This is a simplification. In a real scenario, you'd generate
-        # the full character stats here.
-        new_character = Character(
-            name=character_name,
-            strength=10,
-            intelligence=10,
-            agility=10,
-            maximum_health=100,
-            current_health=100,
-        )
-        games[game_id].characters.append(new_character)
+        games[game_id].characters.append(character)
 
 
-def generate_and_set_scenario_details(game_id: str):
+async def generate_and_set_scenario_details(game_id: str):
     """Generates the scenario notes (DM) and the opening scene.
 
     This will populate `game.scenario_details` and append the opening
     `Scene` into `game.scenes` so the UI can display it immediately.
     """
-    game_state = get_game_state(game_id)
-    if not game_state or not game_state.scenario_name:
+    game = games.get(game_id)
+    if not game or not game.scenario_name:
         return
 
-    # DM notes
-    scenario_details = generator.generate_scenario_details(game_state.scenario_name)
-    game_state.scenario_details = scenario_details
+    # Generate the main story details for the DM
+    details = await generator.generate_scenario_details(game.scenario_name)
+    game.scenario_details = details
 
-    # Opening scene
-    opening = generator.generate_opening_scene(game_state.scenario_name, scene_id=1)
-    game_state.scenes.append(opening)
+    # Generate the very first scene for the players
+    opening_scene = generator.generate_opening_scene(game.scenario_name)
+    game.scenes.append(opening_scene)
 
 
 def get_game_state(game_id: str) -> Optional[Game]:
