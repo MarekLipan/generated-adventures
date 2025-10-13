@@ -1,8 +1,14 @@
-from nicegui import ui
 import asyncio
+import logging
+
+from nicegui import ui
+
 from webapp.services import game_flow  # type: ignore
-from .dm_notes import show_dm_notes_before_characters  # type: ignore
+
 from .characters import show_characters  # type: ignore
+from .dm_notes import show_dm_notes_before_characters  # type: ignore
+
+logger = logging.getLogger()
 
 
 async def show_scenarios(main_container, game_id: str):
@@ -21,9 +27,16 @@ async def show_scenarios(main_container, game_id: str):
 
 
 async def handle_scenario_selection(main_container, game_id: str, scenario_name: str):
+    logger.info(f"Scenario selected: {scenario_name} for game {game_id}")
     game_flow.select_scenario(game_id, scenario_name)
+
+    logger.info("Generating scenario details...")
     await game_flow.generate_and_set_details(game_id)
+    logger.info("Scenario details generated")
+
     if game_flow.show_dm_notes_enabled():
+        logger.info("DM notes enabled, showing DM notes first")
         await show_dm_notes_before_characters(main_container, game_id, scenario_name)
     else:
+        logger.info("DM notes disabled, going directly to character selection")
         await show_characters(main_container, game_id, scenario_name)

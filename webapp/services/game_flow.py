@@ -9,10 +9,10 @@ Purpose:
 
 from __future__ import annotations
 
-from typing import List, Optional
 import os
+from typing import List, Optional
 
-from core import game, generator
+from core import game, generator, persistence
 from core.models import Character, Game, Scene  # type: ignore
 
 # --- Environment / Config helpers -------------------------------------------------
@@ -52,9 +52,11 @@ def select_scenario(game_id: str, scenario_name: str) -> None:
 
 
 async def generate_characters(
-    scenario_name: str, num_characters: int
+    scenario_name: str, num_characters: int, scenario_details: str | None = None
 ) -> List[Character]:
-    return await generator.generate_characters(scenario_name, num_characters=num_characters)  # type: ignore
+    return await generator.generate_characters(
+        scenario_name, num_characters=num_characters, scenario_details=scenario_details
+    )  # type: ignore
 
 
 def add_character(game_id: str, character: Character) -> None:
@@ -70,3 +72,16 @@ def get_current_scene(game_id: str) -> Optional[Scene]:  # type: ignore
 
 def advance_scene(game_id: str, player_action: str) -> Optional[Scene]:  # type: ignore
     return game.advance_scene(game_id, player_action)
+
+
+# --- Game persistence -------------------------------------------------------------
+
+
+def load_game(game_id: str) -> Optional[Game]:  # type: ignore
+    """Load a saved game from disk into memory."""
+    return game.load_game(game_id)
+
+
+def list_saved_games() -> list[tuple[str, str, str]]:
+    """Return list of (game_id, scenario_name, summary) for all saved games."""
+    return persistence.list_saved_games()

@@ -1,8 +1,9 @@
 """Pydantic models for the game state."""
 
 import uuid
-from pydantic import BaseModel, Field
 from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class Character(BaseModel):
@@ -18,6 +19,13 @@ class Character(BaseModel):
     agility: int = Field(..., description="Character's agility attribute", ge=0, le=20)
     maximum_health: int = Field(..., description="Character's maximum health", ge=1)
     current_health: int = Field(..., description="Character's current health", ge=0)
+    backstory: str = Field(
+        ..., description="Character's background story and motivations"
+    )
+    appearance: str = Field(..., description="Physical description of the character")
+    inventory: List[str] = Field(
+        default_factory=list, description="List of items the character carries"
+    )
     image_path: Optional[str] = Field(
         None, description="Path to the character's generated portrait"
     )
@@ -80,6 +88,18 @@ class GeneratedCharacter(BaseModel):
         ..., description="Character's intelligence attribute (1-20)"
     )
     agility: int = Field(..., description="Character's agility attribute (1-20)")
+    backstory: str = Field(
+        ...,
+        description="A 2-3 sentence backstory explaining the character's history and motivations",
+    )
+    appearance: str = Field(
+        ...,
+        description="A 2-3 sentence physical description including clothing, build, and distinctive features",
+    )
+    inventory: List[str] = Field(
+        ...,
+        description="3-5 items the character carries (weapons, tools, magical items, etc.)",
+    )
 
 
 class GeneratedCharacterList(BaseModel):

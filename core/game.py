@@ -7,8 +7,9 @@ scene-based story by calling the generator.
 """
 
 from typing import Optional
-from .models import Game, Character, Scene
-from . import generator
+
+from . import generator, persistence
+from .models import Character, Game, Scene
 
 # In-memory storage for active games, mapping game_id to a Game object.
 games: dict[str, Game] = {}
@@ -18,19 +19,30 @@ def create_new_game(players: int) -> str:
     """Initializes a new game object and returns its ID."""
     new_game = Game(players=players)
     games[new_game.id] = new_game
+    persistence.save_game(new_game)
     return new_game.id
+
+
+def load_game(game_id: str) -> Optional[Game]:
+    """Load a game from disk into memory. Returns the Game if found, None otherwise."""
+    game = persistence.load_game(game_id)
+    if game:
+        games[game_id] = game
+    return game
 
 
 def select_scenario_for_game(game_id: str, scenario_name: str):
     """Updates the game state with the selected scenario."""
     if game_id in games:
         games[game_id].scenario_name = scenario_name
+        persistence.save_game(games[game_id])
 
 
 def add_character_to_game(game_id: str, character: Character):
     """Adds a new character to the game state."""
     if game_id in games:
         games[game_id].characters.append(character)
+        persistence.save_game(games[game_id])
 
 
 async def generate_and_set_scenario_details(game_id: str):
@@ -50,6 +62,8 @@ async def generate_and_set_scenario_details(game_id: str):
     # Generate the very first scene for the players
     opening_scene = generator.generate_opening_scene(game.scenario_name)
     game.scenes.append(opening_scene)
+
+    persistence.save_game(game)
 
 
 def get_game_state(game_id: str) -> Optional[Game]:
@@ -85,4 +99,5 @@ def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[Scene]
         game_state.scenario_name or "", last_id, player_action
     )
     game_state.scenes.append(next_scene)
+    persistence.save_game(game_state)
     return next_scene
