@@ -23,6 +23,7 @@ from .models import (
     GeneratedCharacterList,
     GeneratedScenarioDetails,
     GeneratedScenarios,
+    GeneratedScene,
     Scene,
 )
 
@@ -43,8 +44,8 @@ def _generate_character_image_sync(
     client,
     concept,
     scenario_name: str,
-    safe_scenario: str,
-    scenario_dir: pathlib.Path,
+    game_id: str,
+    game_dir: pathlib.Path,
     idx: int,
 ) -> tuple[str, pathlib.Path | None]:
     """Synchronous helper to generate a single character image.
@@ -105,7 +106,7 @@ def _generate_character_image_sync(
                         .replace(" ", "_")
                     )
                     filename = f"{idx:02d}_{safe_name or 'character'}.png"
-                    image_file_path = scenario_dir / filename
+                    image_file_path = game_dir / filename
                     img.save(image_file_path)
                     logger.info(f"Saved image for {concept.name} at {image_file_path}")
                     break
@@ -131,11 +132,15 @@ async def generate_scenarios() -> list[str]:
 
 
 async def generate_characters(
-    scenario_name: str, num_characters: int = 6, scenario_details: Optional[str] = None
+    game_id: str,
+    scenario_name: str,
+    num_characters: int = 6,
+    scenario_details: Optional[str] = None,
 ) -> List[Character]:
     """Generates a list of characters with stats and portraits for a given scenario.
 
     Args:
+        game_id: Unique identifier for the game (used for image storage)
         scenario_name: Name of the scenario
         num_characters: Number of characters to generate
         scenario_details: Optional markdown details about the scenario (setting, plot, NPCs, etc.)
@@ -177,15 +182,9 @@ Make each character distinctive and memorable with rich details that fit the sce
     logger.info(f"Character concepts generated: {[c.name for c in generated_concepts]}")
 
     # Step 2: Synchronous image generation using working google.genai client
-    # Create scenario-specific directory
-    safe_scenario = (
-        "".join(c for c in scenario_name if c.isalnum() or c in " _-")
-        .strip()
-        .replace(" ", "_")
-        or "scenario"
-    )
-    scenario_dir = IMAGE_DIR / safe_scenario
-    scenario_dir.mkdir(parents=True, exist_ok=True)
+    # Create game-specific directory for character images
+    game_dir = IMAGE_DIR / game_id
+    game_dir.mkdir(parents=True, exist_ok=True)
 
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
 
@@ -199,8 +198,8 @@ Make each character distinctive and memorable with rich details that fit the sce
             client,
             concept,
             scenario_name,
-            safe_scenario,
-            scenario_dir,
+            game_id,
+            game_dir,
             idx,
         )
         for idx, concept in enumerate(generated_concepts, start=1)
@@ -229,7 +228,7 @@ Make each character distinctive and memorable with rich details that fit the sce
             appearance=concept.appearance,
             inventory=concept.inventory,
             image_path=(
-                f"/static/characters/{safe_scenario}/{image_file_path.name}"
+                f"/static/characters/{game_id}/{image_file_path.name}"
                 if image_file_path
                 else None
             ),
@@ -272,45 +271,211 @@ Each field should be 2-4 paragraphs of rich, game-master-usable content for the 
     return markdown
 
 
-def _make_scene(scene_id: int, title: str, body: str) -> Scene:
-    text = f"## Scene {scene_id}: {title}\n\n{body}"
-    return Scene(id=scene_id, text=text, image_path=None, voiceover_path=None)
+def _make_scene(scene_id: int, scene_text: str, prompt_data: dict) -> Scene:
+    """Helper to create a Scene object from generated data.
+
+    Args:
+        scene_id: Unique scene identifier
+        scene_text: The narrative text of the scene
+        prompt_data: Dictionary containing prompt information (type, target_character, prompt_text, etc.)
+    """
+    # Format the scene with the prompt information
+    prompt_type = prompt_data.get("type", "action")
+    target = prompt_data.get("target_character")
+    prompt_text = prompt_data.get("prompt_text", "What do you do?")
+
+    # Build prompt section
+    target_prefix = f"**{target}**: " if target else "**Party**: "
+
+    if prompt_type == "dialogue":
+        prompt_section = f"\n\n---\n\n{target_prefix}{prompt_text}\n\n*Enter dialogue in quotation marks.*"
+    elif prompt_type == "dice_check":
+        dice_info = prompt_data.get("dice_type", "d6")
+        dice_count = prompt_data.get("dice_count", 1)
+        dice_display = f"{dice_count}{dice_info}" if dice_count > 1 else dice_info
+        prompt_section = f"\n\n---\n\n{target_prefix}{prompt_text}\n\n*Roll {dice_display} and enter the result.*"
+    else:  # action
+        prompt_section = (
+            f"\n\n---\n\n{target_prefix}{prompt_text}\n\n*Describe your action.*"
+        )
+
+    full_text = scene_text + prompt_section
+
+    return Scene(id=scene_id, text=full_text, image_path=None, voiceover_path=None)
 
 
-def generate_opening_scene(scenario_name: str, scene_id: int = 1) -> Scene:  # noqa: ARG001 - currently unused in placeholder body
+async def generate_opening_scene(
+    scenario_name: str,
+    scenario_details: str,
+    character_names: List[str],
+    scene_id: int = 1,
+) -> Scene:
     """Generate the opening scene for the chosen scenario.
 
-    Placeholder implementation returns a short description. Replace with
-    LLM-driven content later.
+    Args:
+        scenario_name: Name of the chosen scenario
+        scenario_details: Full markdown details about the scenario
+        character_names: List of character names in the party
+        scene_id: Scene identifier (default 1 for opening)
+
+    Returns:
+        Scene object with narrative text and player prompt
     """
-    title = f"Opening of {scenario_name}"
-    body = (
-        "The party gathers at the edge of the Whispering Village as dusk falls. "
-        "Smoke rises in the distance and villagers whisper of shadows moving in the marshes."
-    )
-    return _make_scene(scene_id, title, body)
+    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
+    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    agent = Agent(model=model, output_type=GeneratedScene)
+
+    logger.info(f"Generating opening scene for: {scenario_name}")
+
+    character_list = ", ".join(character_names)
+
+    prompt = f"""
+You are a creative Dungeon Master for a D&D-style adventure.
+
+SCENARIO: {scenario_name}
+
+SCENARIO DETAILS:
+{scenario_details}
+
+PARTY MEMBERS: {character_list}
+
+Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
+1. Sets the scene and mood
+2. Introduces the immediate situation
+3. Gives players a clear hook into the adventure
+4. References the party members naturally
+
+After the scene narrative, provide a prompt for player interaction. The prompt should be:
+- Either for the entire party or a specific character
+- One of three types:
+  * dialogue: Character should speak (player enters text in quotes)
+  * action: Player describes what they do
+  * dice_check: Player must roll dice (specify d6 or d10, and how many)
+
+Return your response in this JSON structure:
+{{
+  "scene_text": "The vivid narrative of the opening scene...",
+  "prompt": {{
+    "type": "dialogue" | "action" | "dice_check",
+    "dice_type": "d6" | "d10" (only if type is dice_check),
+    "dice_count": 1 or more (only if type is dice_check),
+    "target_character": "Character Name" or null for entire party,
+    "prompt_text": "The question or instruction for the player(s)"
+  }}
+}}
+
+Make the scene immersive and exciting!
+"""
+
+    result = await agent.run(prompt)
+    generated = result.output
+
+    prompt_data = {
+        "type": generated.prompt.type,
+        "dice_type": generated.prompt.dice_type,
+        "dice_count": generated.prompt.dice_count,
+        "target_character": generated.prompt.target_character,
+        "prompt_text": generated.prompt.prompt_text,
+    }
+
+    return _make_scene(scene_id, generated.scene_text, prompt_data)
 
 
-def generate_next_scene(
-    scenario_name: str, last_scene_id: int, player_action: Optional[str]
+async def generate_next_scene(
+    scenario_name: str,
+    scenario_details: str,
+    character_names: List[str],
+    last_scene_id: int,
+    player_action: Optional[str],
+    scene_history: List[str],
 ) -> Scene:
-    """Generate the next scene based on the last scene and a player action.
+    """Generate the next scene based on the story so far and player action.
 
-    This placeholder just increments the scene id and produces a canned
-    continuation. A real implementation would use the scenario, scene history,
-    and the player's action to generate a coherent next scene.
+    Args:
+        scenario_name: Name of the scenario
+        scenario_details: Full markdown details about the scenario
+        character_names: List of character names in the party
+        last_scene_id: ID of the previous scene
+        player_action: The player's response to the last prompt
+        scene_history: List of previous scene texts for context
+
+    Returns:
+        Scene object with narrative text and player prompt
     """
+    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
+    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    agent = Agent(model=model, output_type=GeneratedScene)
+
     next_id = last_scene_id + 1
-    # scenario_name could be incorporated here in future for contextual generation
-    title = (
-        f"Aftermath {next_id} - {scenario_name}"
-        if scenario_name
-        else f"Aftermath {next_id}"
+    logger.info(f"Generating scene {next_id} for: {scenario_name}")
+
+    character_list = ", ".join(character_names)
+
+    # Build scene history context (last 3 scenes to keep context manageable)
+    history_context = ""
+    if scene_history:
+        recent_scenes = scene_history[-3:]
+        history_context = "PREVIOUS SCENES:\n" + "\n\n".join(
+            f"Scene {i}: {scene}"
+            for i, scene in enumerate(
+                recent_scenes, start=max(1, next_id - len(recent_scenes))
+            )
+        )
+
+    action_context = (
+        f"\n\nPLAYER'S LAST ACTION/RESPONSE: {player_action}" if player_action else ""
     )
-    action_line = f"The party's action: '{player_action}'.\n\n" if player_action else ""
-    body = (
-        action_line
-        + f"Pressing onward in the scope of the '{scenario_name}' narrative, the party moves deeper into the marsh. "
-        + "Strange lights dance between the twisted trees and a distant tower gleams black against the sky."
-    )
-    return _make_scene(next_id, title, body)
+
+    prompt = f"""
+You are a creative Dungeon Master for a D&D-style adventure.
+
+SCENARIO: {scenario_name}
+
+SCENARIO DETAILS:
+{scenario_details}
+
+PARTY MEMBERS: {character_list}
+
+{history_context}{action_context}
+
+Generate the next scene in this adventure. The scene should:
+1. Respond naturally to the player's action (if provided)
+2. Advance the story toward the main quest
+3. Introduce new challenges, discoveries, or NPCs as appropriate
+4. Maintain tension and engagement
+5. Reference party members when relevant
+
+After the scene narrative, provide a prompt for player interaction. The prompt should be:
+- Either for the entire party or a specific character
+- One of three types:
+  * dialogue: Character should speak (player enters text in quotes)
+  * action: Player describes what they do
+  * dice_check: Player must roll dice (specify d6 or d10, and how many)
+
+Return your response in this JSON structure:
+{{
+  "scene_text": "The vivid narrative of what happens next...",
+  "prompt": {{
+    "type": "dialogue" | "action" | "dice_check",
+    "dice_type": "d6" | "d10" (only if type is dice_check),
+    "dice_count": 1 or more (only if type is dice_check),
+    "target_character": "Character Name" or null for entire party,
+    "prompt_text": "The question or instruction for the player(s)"
+  }}
+}}
+
+Continue the adventure!
+"""
+
+    result = await agent.run(prompt)
+    generated = result.output
+
+    prompt_data = {
+        "type": generated.prompt.type,
+        "dice_type": generated.prompt.dice_type,
+        "dice_count": generated.prompt.dice_count,
+        "target_character": generated.prompt.target_character,
+        "prompt_text": generated.prompt.prompt_text,
+    }
+
+    return _make_scene(next_id, generated.scene_text, prompt_data)

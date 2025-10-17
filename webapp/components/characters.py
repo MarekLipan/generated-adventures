@@ -29,7 +29,8 @@ async def show_characters(
         try:
             logger.info("Starting character generation with scenario context...")
             all_characters: List[Character] = await game_flow.generate_characters(
-                scenario_name,
+                game_id=game_id,
+                scenario_name=scenario_name,
                 num_characters=6,
                 scenario_details=game_state.scenario_details,
             )  # type: ignore

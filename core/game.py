@@ -60,7 +60,10 @@ async def generate_and_set_scenario_details(game_id: str):
     game.scenario_details = details
 
     # Generate the very first scene for the players
-    opening_scene = generator.generate_opening_scene(game.scenario_name)
+    character_names = [char.name for char in game.characters]
+    opening_scene = await generator.generate_opening_scene(
+        game.scenario_name, game.scenario_details or "", character_names
+    )
     game.scenes.append(opening_scene)
 
     persistence.save_game(game)
@@ -79,7 +82,7 @@ def get_current_scene(game_id: str) -> Optional[Scene]:
     return game_state.scenes[-1]
 
 
-def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[Scene]:
+async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[Scene]:
     """Generate and append the next scene based on a player's action.
 
     Returns the newly-created Scene, or None on error.
@@ -95,8 +98,17 @@ def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[Scene]
     if player_action is not None:
         game_state.player_actions.append(player_action)
 
-    next_scene = generator.generate_next_scene(
-        game_state.scenario_name or "", last_id, player_action
+    # Get character names and scene history
+    character_names = [char.name for char in game_state.characters]
+    scene_history = [scene.text for scene in game_state.scenes]
+
+    next_scene = await generator.generate_next_scene(
+        scenario_name=game_state.scenario_name or "",
+        scenario_details=game_state.scenario_details or "",
+        character_names=character_names,
+        last_scene_id=last_id,
+        player_action=player_action,
+        scene_history=scene_history,
     )
     game_state.scenes.append(next_scene)
     persistence.save_game(game_state)

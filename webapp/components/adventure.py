@@ -1,4 +1,5 @@
 from nicegui import ui
+
 from webapp.services import game_flow  # type: ignore
 
 
@@ -12,9 +13,9 @@ async def start_adventure(main_container, game_id: str):
                 label="Your action", placeholder="What does your party do?"
             )
 
-            def on_submit(_e=None):
+            async def on_submit(_e=None):
                 player_action = action_input.value
-                next_scene = game_flow.advance_scene(game_id, player_action)
+                next_scene = await game_flow.advance_scene(game_id, player_action)
                 if next_scene:
                     render_scene(next_scene)
                 else:

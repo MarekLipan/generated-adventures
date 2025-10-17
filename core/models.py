@@ -106,3 +106,41 @@ class GeneratedCharacterList(BaseModel):
     """Represents a list of generated characters."""
 
     characters: List[GeneratedCharacter]
+
+
+class PromptType(BaseModel):
+    """Represents a prompt type for player interaction."""
+
+    type: str = Field(
+        ...,
+        description="Type of prompt: 'dialogue', 'action', 'dice_check'. For dialogue, player speaks in character. For action, player describes what they do. For dice_check, player rolls dice.",
+    )
+    dice_type: Optional[str] = Field(
+        None,
+        description="Type of dice to roll if type is 'dice_check': 'd6', 'd10', or 'multiple' (for multiple dice)",
+    )
+    dice_count: Optional[int] = Field(
+        None,
+        description="Number of dice to roll if type is 'dice_check' (e.g., 2 for rolling 2d6)",
+    )
+    target_character: Optional[str] = Field(
+        None,
+        description="Name of specific character being prompted, or None for entire party",
+    )
+    prompt_text: str = Field(
+        ...,
+        description="The actual prompt/question to present to the player(s)",
+    )
+
+
+class GeneratedScene(BaseModel):
+    """Represents a generated scene with narrative and player prompt."""
+
+    scene_text: str = Field(
+        ...,
+        description="The narrative text of the scene, describing what happens, what the players see, hear, and experience. Should be vivid and engaging.",
+    )
+    prompt: PromptType = Field(
+        ...,
+        description="The prompt for player interaction following the scene",
+    )

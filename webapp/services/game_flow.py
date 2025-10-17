@@ -52,10 +52,16 @@ def select_scenario(game_id: str, scenario_name: str) -> None:
 
 
 async def generate_characters(
-    scenario_name: str, num_characters: int, scenario_details: str | None = None
+    game_id: str,
+    scenario_name: str,
+    num_characters: int,
+    scenario_details: str | None = None,
 ) -> List[Character]:
     return await generator.generate_characters(
-        scenario_name, num_characters=num_characters, scenario_details=scenario_details
+        game_id=game_id,
+        scenario_name=scenario_name,
+        num_characters=num_characters,
+        scenario_details=scenario_details,
     )  # type: ignore
 
 
@@ -70,8 +76,8 @@ def get_current_scene(game_id: str) -> Optional[Scene]:  # type: ignore
     return game.get_current_scene(game_id)
 
 
-def advance_scene(game_id: str, player_action: str) -> Optional[Scene]:  # type: ignore
-    return game.advance_scene(game_id, player_action)
+async def advance_scene(game_id: str, player_action: str) -> Optional[Scene]:  # type: ignore
+    return await game.advance_scene(game_id, player_action)
 
 
 # --- Game persistence -------------------------------------------------------------
