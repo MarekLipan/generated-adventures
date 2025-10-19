@@ -46,10 +46,11 @@ def add_character_to_game(game_id: str, character: Character):
 
 
 async def generate_and_set_scenario_details(game_id: str):
-    """Generates the scenario notes (DM) and the opening scene.
+    """Generates the scenario notes (DM) only.
 
-    This will populate `game.scenario_details` and append the opening
-    `Scene` into `game.scenes` so the UI can display it immediately.
+    This will populate `game.scenario_details` with the background information
+    for the Dungeon Master. The opening scene should be generated separately
+    after the party is selected.
     """
     game = games.get(game_id)
     if not game or not game.scenario_name:
@@ -59,12 +60,26 @@ async def generate_and_set_scenario_details(game_id: str):
     details = await generator.generate_scenario_details(game.scenario_name)
     game.scenario_details = details
 
-    # Generate the very first scene for the players
-    character_names = [char.name for char in game.characters]
-    opening_scene = await generator.generate_opening_scene(
-        game.scenario_name, game.scenario_details or "", character_names
+    persistence.save_game(game)
+
+
+async def generate_opening_scene(game_id: str):
+    """Generates the opening scene for the adventure.
+
+    This should be called after the party has been selected and characters
+    have been generated. It will create the first scene and update character
+    states if needed.
+    """
+    game = games.get(game_id)
+    if not game or not game.scenario_name or not game.characters:
+        return
+
+    # Generate the very first scene for the players (and get updated character states)
+    opening_scene, updated_characters = await generator.generate_opening_scene(
+        game.scenario_name, game.scenario_details or "", game.characters
     )
     game.scenes.append(opening_scene)
+    game.characters = updated_characters  # Update character states
 
     persistence.save_game(game)
 
@@ -98,18 +113,30 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
     if player_action is not None:
         game_state.player_actions.append(player_action)
 
-    # Get character names and scene history
-    character_names = [char.name for char in game_state.characters]
-    scene_history = [scene.text for scene in game_state.scenes]
+    # Build complete conversation history with scenes, prompts, and player actions
+    # This gives the AI full context of the entire exchange
+    conversation_history = []
+    for i, scene in enumerate(game_state.scenes):
+        conversation_history.append(
+            {
+                "scene_id": scene.id,
+                "scene_text": scene.text,
+                "prompt": scene.prompt,
+                "player_action": game_state.player_actions[i]
+                if i < len(game_state.player_actions)
+                else None,
+            }
+        )
 
-    next_scene = await generator.generate_next_scene(
+    next_scene, updated_characters = await generator.generate_next_scene(
         scenario_name=game_state.scenario_name or "",
         scenario_details=game_state.scenario_details or "",
-        character_names=character_names,
+        characters=game_state.characters,
         last_scene_id=last_id,
         player_action=player_action,
-        scene_history=scene_history,
+        conversation_history=conversation_history,
     )
     game_state.scenes.append(next_scene)
+    game_state.characters = updated_characters  # Update character states
     persistence.save_game(game_state)
     return next_scene

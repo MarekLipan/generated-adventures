@@ -271,55 +271,197 @@ Each field should be 2-4 paragraphs of rich, game-master-usable content for the 
     return markdown
 
 
-def _make_scene(scene_id: int, scene_text: str, prompt_data: dict) -> Scene:
+def _apply_character_updates(
+    characters: List[Character], updated_generated_chars: List
+) -> List[Character]:
+    """Apply character state updates from regenerated character data.
+
+    Args:
+        characters: List of current character objects (with image_path, etc.)
+        updated_generated_chars: List of GeneratedCharacter objects from the LLM
+
+    Returns:
+        Updated list of characters with modifications applied
+    """
+    # Create a dictionary for quick character lookup by name
+    char_dict = {char.name: char for char in characters}
+
+    for updated_char in updated_generated_chars:
+        if updated_char.name not in char_dict:
+            logger.warning(
+                f"Character update for unknown character: {updated_char.name}. Skipping."
+            )
+            continue
+
+        char = char_dict[updated_char.name]
+        changes = []
+
+        # Track changes for logging
+        if char.strength != updated_char.strength:
+            changes.append(f"STR: {char.strength} -> {updated_char.strength}")
+            char.strength = updated_char.strength
+
+        if char.intelligence != updated_char.intelligence:
+            changes.append(f"INT: {char.intelligence} -> {updated_char.intelligence}")
+            char.intelligence = updated_char.intelligence
+
+        if char.agility != updated_char.agility:
+            changes.append(f"AGI: {char.agility} -> {updated_char.agility}")
+            char.agility = updated_char.agility
+
+        # Update health (clamp to maximum)
+        if char.current_health != updated_char.current_health:
+            old_health = char.current_health
+            char.current_health = max(
+                0, min(updated_char.current_health, char.maximum_health)
+            )
+            changes.append(f"Health: {old_health} -> {char.current_health}")
+
+        # Update inventory (replace entirely with new inventory)
+        old_inventory = set(char.inventory)
+        new_inventory = set(updated_char.inventory)
+
+        added = new_inventory - old_inventory
+        removed = old_inventory - new_inventory
+
+        if added:
+            changes.append(f"Gained: {', '.join(added)}")
+        if removed:
+            changes.append(f"Lost: {', '.join(removed)}")
+
+        char.inventory = updated_char.inventory
+
+        # Update backstory and appearance if they changed (shouldn't normally change)
+        if char.backstory != updated_char.backstory:
+            char.backstory = updated_char.backstory
+        if char.appearance != updated_char.appearance:
+            char.appearance = updated_char.appearance
+
+        if changes:
+            logger.info(f"Updated {char.name}: {', '.join(changes)}")
+
+    return characters
+
+
+def _make_scene(scene_id: int, scene_text: str, prompt) -> Scene:
     """Helper to create a Scene object from generated data.
 
     Args:
         scene_id: Unique scene identifier
         scene_text: The narrative text of the scene
-        prompt_data: Dictionary containing prompt information (type, target_character, prompt_text, etc.)
+        prompt: PromptType object from the generated scene
     """
-    # Format the scene with the prompt information
-    prompt_type = prompt_data.get("type", "action")
-    target = prompt_data.get("target_character")
-    prompt_text = prompt_data.get("prompt_text", "What do you do?")
+    return Scene(
+        id=scene_id,
+        text=scene_text,
+        prompt=prompt,
+        image_path=None,
+        voiceover_path=None,
+    )
 
-    # Build prompt section
-    target_prefix = f"**{target}**: " if target else "**Party**: "
 
-    if prompt_type == "dialogue":
-        prompt_section = f"\n\n---\n\n{target_prefix}{prompt_text}\n\n*Enter dialogue in quotation marks.*"
-    elif prompt_type == "dice_check":
-        dice_info = prompt_data.get("dice_type", "d6")
-        dice_count = prompt_data.get("dice_count", 1)
-        dice_display = f"{dice_count}{dice_info}" if dice_count > 1 else dice_info
-        prompt_section = f"\n\n---\n\n{target_prefix}{prompt_text}\n\n*Roll {dice_display} and enter the result.*"
-    else:  # action
-        prompt_section = (
-            f"\n\n---\n\n{target_prefix}{prompt_text}\n\n*Describe your action.*"
-        )
+def _build_scene_generation_prompt_rules() -> str:
+    """Returns the common rules section for scene generation prompts."""
+    return """
+After the scene narrative, provide a prompt for player interaction. The prompt should be:
+- Either for the entire party or a specific character
+- One of three types:
+  * dialogue: Character should speak (player enters text in quotes)
+  * action: Player describes what they do (for simple, non-risky actions)
+  * dice_check: Player must roll dice (for ANY risky action, test of skill, or combat)
 
-    full_text = scene_text + prompt_section
+CRITICAL RULES FOR PROMPT TYPES - VARY THE PROMPTS:
+- DO NOT use dice_check for every scene - mix dialogue, action, and dice_check
+- Use dialogue when: characters need to talk to NPCs, negotiate, roleplay conversations
+- Use action for: simple tasks, exploration without immediate danger, planning, easy skill checks
+- Use dice_check for: combat, risky actions, difficult skill checks, life-or-death situations
 
-    return Scene(id=scene_id, text=full_text, image_path=None, voiceover_path=None)
+DICE CHECK RULES (when using dice_check type):
+- Choose dice type based on difficulty:
+  * d6: Simple to moderate challenges (lockpicking, climbing, basic combat)
+  * d10: Challenging situations (difficult combat, dangerous magic, persuading hostile NPCs)
+- Choose dice count based on the situation:
+  * 1 die: Single character making one attempt
+  * 2-3 dice: Multiple attempts, team effort, or more dramatic moments
+  * 4+ dice: Epic moments, multiple characters acting together
+- Vary your dice choices - don't always use the same type and count!
+
+TARGETING RULES:
+- Use target_character to address specific party members when their unique skills/abilities are relevant
+- Use null (entire party) when any character could respond or multiple characters should act together
+
+CRITICAL RULES FOR CHARACTER UPDATES:
+- ALWAYS return updated_characters array with ALL party members
+- Re-generate complete character data (stats, health, inventory) based on what happened in the scene
+- Update current_health for characters who took damage or were healed (keep stats same unless permanently changed)
+- Update inventory to reflect items gained, lost, used, or consumed
+- If nothing happened to a character, return them unchanged
+- Keep backstory and appearance the same (these don't change during adventures)
+
+Return your response in this JSON structure:
+{
+  "scene_text": "The vivid narrative of the scene...",
+  "prompt": {
+    "type": "dialogue" | "action" | "dice_check",
+    "dice_type": "d6" | "d10" (only if type is dice_check),
+    "dice_count": 1 to 6 (only if type is dice_check),
+    "target_character": "Character Name" or null for entire party,
+    "prompt_text": "The question or instruction for the player(s)"
+  },
+  "updated_characters": [
+    {
+      "name": "Character Name",
+      "strength": stat_value,
+      "intelligence": stat_value,
+      "agility": stat_value,
+      "current_health": current_health_value,
+      "backstory": "same as before",
+      "appearance": "same as before",
+      "inventory": ["current", "items", "list"]
+    }
+  ]
+}
+"""
+
+
+def _build_impossible_action_rules() -> str:
+    """Returns rules for handling impossible player actions."""
+    return """
+CRITICAL RULES FOR HANDLING PLAYER ACTIONS:
+- If player attempts an IMPOSSIBLE action (using items they don't have, doing something beyond their character's capabilities, breaking world logic):
+  * DO NOT allow the action to succeed
+  * In scene_text, explain why it's not possible
+  * Prompt them to try something different (use "action" type prompt)
+  * Example: "You reach for the magic sword, but you don't have such an item. What do you do instead?"
+
+- If player describes an action that should undergo a test or challenge:
+  * DO NOT resolve it immediately
+  * Prompt for dice_check to determine success/failure
+  * Examples: attacking, dodging, climbing, lockpicking, persuading, searching, casting difficult spells
+
+- COMBAT and FIGHTING scenarios MUST use dice_check prompts:
+  * Any attack, defense, or combat maneuver requires dice
+  * Multiple characters in combat should each get dice_check prompts
+  * Never auto-resolve combat without dice rolls
+"""
 
 
 async def generate_opening_scene(
     scenario_name: str,
     scenario_details: str,
-    character_names: List[str],
+    characters: List[Character],
     scene_id: int = 1,
-) -> Scene:
+) -> tuple[Scene, List[Character]]:
     """Generate the opening scene for the chosen scenario.
 
     Args:
         scenario_name: Name of the chosen scenario
         scenario_details: Full markdown details about the scenario
-        character_names: List of character names in the party
+        characters: List of Character objects in the party (with full stats, inventory, backstory)
         scene_id: Scene identifier (default 1 for opening)
 
     Returns:
-        Scene object with narrative text and player prompt
+        Tuple of (Scene object with narrative text and player prompt, Updated character list)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
@@ -327,103 +469,17 @@ async def generate_opening_scene(
 
     logger.info(f"Generating opening scene for: {scenario_name}")
 
-    character_list = ", ".join(character_names)
-
-    prompt = f"""
-You are a creative Dungeon Master for a D&D-style adventure.
-
-SCENARIO: {scenario_name}
-
-SCENARIO DETAILS:
-{scenario_details}
-
-PARTY MEMBERS: {character_list}
-
-Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
-1. Sets the scene and mood
-2. Introduces the immediate situation
-3. Gives players a clear hook into the adventure
-4. References the party members naturally
-
-After the scene narrative, provide a prompt for player interaction. The prompt should be:
-- Either for the entire party or a specific character
-- One of three types:
-  * dialogue: Character should speak (player enters text in quotes)
-  * action: Player describes what they do
-  * dice_check: Player must roll dice (specify d6 or d10, and how many)
-
-Return your response in this JSON structure:
-{{
-  "scene_text": "The vivid narrative of the opening scene...",
-  "prompt": {{
-    "type": "dialogue" | "action" | "dice_check",
-    "dice_type": "d6" | "d10" (only if type is dice_check),
-    "dice_count": 1 or more (only if type is dice_check),
-    "target_character": "Character Name" or null for entire party,
-    "prompt_text": "The question or instruction for the player(s)"
-  }}
-}}
-
-Make the scene immersive and exciting!
-"""
-
-    result = await agent.run(prompt)
-    generated = result.output
-
-    prompt_data = {
-        "type": generated.prompt.type,
-        "dice_type": generated.prompt.dice_type,
-        "dice_count": generated.prompt.dice_count,
-        "target_character": generated.prompt.target_character,
-        "prompt_text": generated.prompt.prompt_text,
-    }
-
-    return _make_scene(scene_id, generated.scene_text, prompt_data)
-
-
-async def generate_next_scene(
-    scenario_name: str,
-    scenario_details: str,
-    character_names: List[str],
-    last_scene_id: int,
-    player_action: Optional[str],
-    scene_history: List[str],
-) -> Scene:
-    """Generate the next scene based on the story so far and player action.
-
-    Args:
-        scenario_name: Name of the scenario
-        scenario_details: Full markdown details about the scenario
-        character_names: List of character names in the party
-        last_scene_id: ID of the previous scene
-        player_action: The player's response to the last prompt
-        scene_history: List of previous scene texts for context
-
-    Returns:
-        Scene object with narrative text and player prompt
-    """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
-    agent = Agent(model=model, output_type=GeneratedScene)
-
-    next_id = last_scene_id + 1
-    logger.info(f"Generating scene {next_id} for: {scenario_name}")
-
-    character_list = ", ".join(character_names)
-
-    # Build scene history context (last 3 scenes to keep context manageable)
-    history_context = ""
-    if scene_history:
-        recent_scenes = scene_history[-3:]
-        history_context = "PREVIOUS SCENES:\n" + "\n\n".join(
-            f"Scene {i}: {scene}"
-            for i, scene in enumerate(
-                recent_scenes, start=max(1, next_id - len(recent_scenes))
-            )
-        )
-
-    action_context = (
-        f"\n\nPLAYER'S LAST ACTION/RESPONSE: {player_action}" if player_action else ""
+    # Build detailed character information for context
+    character_sheets = "\n\n".join(
+        [
+            f"**{char.name}**\n"
+            f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
+            f"- Health: {char.current_health}/{char.maximum_health}\n"
+            f"- Backstory: {char.backstory}\n"
+            f"- Appearance: {char.appearance}\n"
+            f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'}"
+            for char in characters
+        ]
     )
 
     prompt = f"""
@@ -434,7 +490,123 @@ SCENARIO: {scenario_name}
 SCENARIO DETAILS:
 {scenario_details}
 
-PARTY MEMBERS: {character_list}
+PARTY CHARACTER SHEETS:
+{character_sheets}
+
+Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
+1. Sets the scene and mood
+2. Introduces the immediate situation
+3. Gives players a clear hook into the adventure
+4. References the party members naturally (consider their backstories, appearance, and capabilities)
+5. Be aware of their current stats, health, and inventory when setting up situations
+
+{_build_scene_generation_prompt_rules()}
+
+Make the scene immersive and exciting!
+"""
+
+    result = await agent.run(prompt)
+    generated = result.output
+
+    # Apply character updates from the scene
+    updated_characters = _apply_character_updates(
+        characters, generated.updated_characters
+    )
+
+    scene = _make_scene(scene_id, generated.scene_text, generated.prompt)
+    return scene, updated_characters
+
+
+async def generate_next_scene(
+    scenario_name: str,
+    scenario_details: str,
+    characters: List[Character],
+    last_scene_id: int,
+    player_action: Optional[str],
+    conversation_history: List[dict],
+) -> tuple[Scene, List[Character]]:
+    """Generate the next scene based on the story so far and player action.
+
+    Args:
+        scenario_name: Name of the scenario
+        scenario_details: Full markdown details about the scenario
+        characters: List of Character objects in the party (with full stats, inventory, backstory)
+        last_scene_id: ID of the previous scene
+        player_action: The player's response to the last prompt
+        conversation_history: List of dicts containing scene_text, prompt, and player_action for full context
+
+    Returns:
+        Tuple of (Scene object with narrative text and player prompt, Updated character list)
+    """
+    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
+    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    agent = Agent(model=model, output_type=GeneratedScene)
+
+    next_id = last_scene_id + 1
+    logger.info(f"Generating scene {next_id} for: {scenario_name}")
+
+    # Build detailed character information for context
+    character_sheets = "\n\n".join(
+        [
+            f"**{char.name}**\n"
+            f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
+            f"- Health: {char.current_health}/{char.maximum_health}\n"
+            f"- Backstory: {char.backstory}\n"
+            f"- Appearance: {char.appearance}\n"
+            f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'}"
+            for char in characters
+        ]
+    )
+
+    # Build complete conversation history showing the full exchange between DM and players
+    history_context = ""
+    if conversation_history:
+        history_parts = []
+        for entry in conversation_history:
+            scene_part = f"**Scene {entry['scene_id']}:**\n{entry['scene_text']}"
+
+            # Add the prompt that was given to the player
+            if entry.get("prompt"):
+                prompt_obj = entry["prompt"]
+                target = (
+                    f"{prompt_obj.target_character}"
+                    if prompt_obj.target_character
+                    else "Party"
+                )
+                prompt_type_icon = (
+                    "🎲"
+                    if prompt_obj.type == "dice_check"
+                    else "💬"
+                    if prompt_obj.type == "dialogue"
+                    else "⚔️"
+                )
+                scene_part += f"\n\n{prompt_type_icon} **DM prompts {target}:** {prompt_obj.prompt_text}"
+
+            # Add the player's response
+            if entry.get("player_action"):
+                scene_part += f"\n\n**Player responded:** {entry['player_action']}"
+
+            history_parts.append(scene_part)
+
+        history_context = "FULL CONVERSATION HISTORY:\n\n" + "\n\n---\n\n".join(
+            history_parts
+        )
+
+    # Current action context (this is the response to the last prompt)
+    action_context = (
+        f"\n\nCURRENT PLAYER ACTION: {player_action}" if player_action else ""
+    )
+
+    prompt = f"""
+You are a creative Dungeon Master for a D&D-style adventure.
+
+SCENARIO: {scenario_name}
+
+SCENARIO DETAILS:
+{scenario_details}
+
+PARTY CHARACTER SHEETS:
+{character_sheets}
 
 {history_context}{action_context}
 
@@ -443,26 +615,13 @@ Generate the next scene in this adventure. The scene should:
 2. Advance the story toward the main quest
 3. Introduce new challenges, discoveries, or NPCs as appropriate
 4. Maintain tension and engagement
-5. Reference party members when relevant
+5. Reference party members when relevant (consider their backstories, appearance, and capabilities)
+6. Be aware of their CURRENT stats, health, and inventory - check if they actually have items they try to use
+7. Adjust challenge difficulty based on party's current health and capabilities
 
-After the scene narrative, provide a prompt for player interaction. The prompt should be:
-- Either for the entire party or a specific character
-- One of three types:
-  * dialogue: Character should speak (player enters text in quotes)
-  * action: Player describes what they do
-  * dice_check: Player must roll dice (specify d6 or d10, and how many)
+{_build_impossible_action_rules()}
 
-Return your response in this JSON structure:
-{{
-  "scene_text": "The vivid narrative of what happens next...",
-  "prompt": {{
-    "type": "dialogue" | "action" | "dice_check",
-    "dice_type": "d6" | "d10" (only if type is dice_check),
-    "dice_count": 1 or more (only if type is dice_check),
-    "target_character": "Character Name" or null for entire party,
-    "prompt_text": "The question or instruction for the player(s)"
-  }}
-}}
+{_build_scene_generation_prompt_rules()}
 
 Continue the adventure!
 """
@@ -470,12 +629,10 @@ Continue the adventure!
     result = await agent.run(prompt)
     generated = result.output
 
-    prompt_data = {
-        "type": generated.prompt.type,
-        "dice_type": generated.prompt.dice_type,
-        "dice_count": generated.prompt.dice_count,
-        "target_character": generated.prompt.target_character,
-        "prompt_text": generated.prompt.prompt_text,
-    }
+    # Apply character updates from the scene
+    updated_characters = _apply_character_updates(
+        characters, generated.updated_characters
+    )
 
-    return _make_scene(next_id, generated.scene_text, prompt_data)
+    scene = _make_scene(next_id, generated.scene_text, generated.prompt)
+    return scene, updated_characters

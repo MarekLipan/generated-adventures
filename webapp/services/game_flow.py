@@ -33,6 +33,10 @@ async def generate_and_set_details(game_id: str) -> None:
     await game.generate_and_set_scenario_details(game_id)
 
 
+async def generate_opening_scene(game_id: str) -> None:
+    await game.generate_opening_scene(game_id)
+
+
 # --- Game state access ------------------------------------------------------------
 
 
