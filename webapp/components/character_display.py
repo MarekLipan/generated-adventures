@@ -36,9 +36,19 @@ def render_character_cards(characters):
                         ui.label("Appearance:").classes("font-bold text-xs mt-2")
                         ui.label(character.appearance).classes("text-xs mb-2")
 
+                        ui.label("Personality:").classes("font-bold text-xs")
+                        ui.label(character.personality).classes("text-xs mb-2")
+
                         ui.label("Backstory:").classes("font-bold text-xs")
                         ui.label(character.backstory).classes("text-xs mb-2")
 
-                        ui.label("Inventory:").classes("font-bold text-xs")
+                        ui.label("Skills:").classes("font-bold text-xs")
+                        if character.skills:
+                            for skill in character.skills:
+                                ui.label(f"• {skill}").classes("text-xs ml-2")
+                        else:
+                            ui.label("None").classes("text-xs ml-2")
+
+                        ui.label("Inventory:").classes("font-bold text-xs mt-2")
                         for item in character.inventory:
                             ui.label(f"• {item}").classes("text-xs ml-2")

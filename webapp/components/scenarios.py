@@ -12,6 +12,13 @@ logger = logging.getLogger()
 
 
 async def show_scenarios(main_container, game_id: str):
+    # Show loading indicator while generating scenarios
+    main_container.clear()
+    with main_container:
+        ui.label("Generating scenarios...").classes("text-h5 mb-4")
+        ui.spinner(size="lg")
+        ui.label("🗺️ Creating adventure scenarios...").classes("text-gray-600 mt-4")
+
     scenarios = await game_flow.generate_scenarios()
     main_container.clear()
     with main_container:
@@ -29,6 +36,15 @@ async def show_scenarios(main_container, game_id: str):
 async def handle_scenario_selection(main_container, game_id: str, scenario_name: str):
     logger.info(f"Scenario selected: {scenario_name} for game {game_id}")
     game_flow.select_scenario(game_id, scenario_name)
+
+    # Show loading indicator while generating scenario details
+    main_container.clear()
+    with main_container:
+        ui.label("Generating scenario details...").classes("text-h5 mb-4")
+        ui.spinner(size="lg")
+        ui.label("📜 The Dungeon Master is preparing the story...").classes(
+            "text-gray-600 mt-4"
+        )
 
     logger.info("Generating scenario details...")
     await game_flow.generate_and_set_details(game_id)

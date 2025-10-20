@@ -76,7 +76,7 @@ async def generate_opening_scene(game_id: str):
 
     # Generate the very first scene for the players (and get updated character states)
     opening_scene, updated_characters = await generator.generate_opening_scene(
-        game.scenario_name, game.scenario_details or "", game.characters
+        game_id, game.scenario_name, game.scenario_details or "", game.characters
     )
     game.scenes.append(opening_scene)
     game.characters = updated_characters  # Update character states
@@ -129,6 +129,7 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         )
 
     next_scene, updated_characters = await generator.generate_next_scene(
+        game_id=game_id,
         scenario_name=game_state.scenario_name or "",
         scenario_details=game_state.scenario_details or "",
         characters=game_state.characters,

@@ -27,6 +27,15 @@ async def show_characters(
     # Only generate characters if not cached (first time)
     if cached_characters is None:
         try:
+            # Show loading indicator
+            main_container.clear()
+            with main_container:
+                ui.label("Generating characters...").classes("text-h5 mb-4")
+                ui.spinner(size="lg")
+                ui.label("✨ Creating unique heroes for your adventure...").classes(
+                    "text-gray-600 mt-4"
+                )
+
             logger.info("Starting character generation with scenario context...")
             all_characters: List[Character] = await game_flow.generate_characters(
                 game_id=game_id,

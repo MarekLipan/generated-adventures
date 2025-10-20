@@ -39,6 +39,9 @@ if not logger.hasHandlers():
 IMAGE_DIR = pathlib.Path("webapp/static/characters")
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+SCENE_IMAGE_DIR = pathlib.Path("webapp/static/scenes")
+SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def _generate_character_image_sync(
     client,
@@ -58,6 +61,7 @@ def _generate_character_image_sync(
         f"Character Name: {concept.name}",
         f"Scenario: {scenario_name}",
         f"Appearance: {concept.appearance}",
+        f"Personality: {concept.personality}",
         f"Backstory Context: {concept.backstory}",
     ]
 
@@ -117,6 +121,147 @@ def _generate_character_image_sync(
     return concept.name, image_file_path
 
 
+def _generate_scene_image_sync(
+    client,
+    game_id: str,
+    scene_id: int,
+    scene_text: str,
+    characters: List[Character],
+    scenario_name: str,
+    previous_scene_image_path: Optional[pathlib.Path] = None,
+) -> pathlib.Path | None:
+    """Synchronous helper to generate a scene image.
+
+    Args:
+        client: Google GenAI client
+        game_id: Game identifier for directory structure
+        scene_id: Scene number
+        scene_text: The narrative text of the scene
+        characters: List of characters in the party (for reference images)
+        scenario_name: Name of the scenario
+        previous_scene_image_path: Optional path to the previous scene's image for visual continuity
+
+    Returns:
+        Path to saved scene image or None if generation failed
+    """
+    from google.genai import types as genai_types  # type: ignore
+
+    # Create scene directory for this game
+    scene_dir = SCENE_IMAGE_DIR / game_id
+    scene_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build prompt with scene context
+    prompt_parts = [
+        "CRITICAL: Generate image in LANDSCAPE/HORIZONTAL orientation - width MUST be greater than height (16:9 aspect ratio).",
+        "Generate a high quality fantasy scene illustration.",
+        "Based on this narrative:",
+        f"\n{scene_text}\n",
+        f"Scenario: {scenario_name}",
+        "\nIMPORTANT CHARACTER INSTRUCTIONS:",
+        "- Characters should have DYNAMIC poses and body language that match the action/emotion of the scene",
+        "- Show appropriate facial expressions and emotions (fear, determination, excitement, etc.)",
+        "- Position characters naturally engaged in the scene's action, not standing static",
+        "- If combat/action: show fighting stances, movement, tension",
+        "- If dialogue/social: show gestures, interactions between characters",
+        "- If exploration: show characters examining, pointing, reacting to environment",
+        "- Match each character's personality traits, mannerisms, and nature to their pose, expression, and body language",
+        "- Use the character reference images for appearance (the images have personality context embedded)",
+    ]
+
+    # Add note about previous scene if available
+    if previous_scene_image_path:
+        prompt_parts.append(
+            "- Use the previous scene image as a reference for visual continuity in style, lighting, and environment"
+        )
+
+    prompt_parts.extend(
+        [
+            "\nStyle: cinematic landscape composition, painterly, dramatic lighting, atmospheric, fantasy art, detailed environment, wide angle view.",
+            "\nCRITICAL FORMAT REQUIREMENT: Image MUST be in LANDSCAPE/HORIZONTAL orientation (wider than tall). Aspect ratio 16:9 or similar wide format.",
+        ]
+    )
+
+    prompt_text = " ".join(prompt_parts)
+
+    # Prepare content with text prompt and reference images
+    content_parts = [prompt_text]
+
+    # Add previous scene image for visual continuity (if available)
+    if previous_scene_image_path and previous_scene_image_path.exists():
+        try:
+            with open(previous_scene_image_path, "rb") as f:
+                prev_image_data = f.read()
+            content_parts.append(
+                genai_types.Part.from_bytes(data=prev_image_data, mime_type="image/png")
+            )
+            logger.info(
+                f"Added previous scene image for continuity: {previous_scene_image_path.name}"
+            )
+        except Exception as e:
+            logger.warning(f"Could not load previous scene image: {e}")
+
+    # Add character images as reference (if they exist)
+    for char in characters:
+        if char.image_path:
+            # Convert web path to file path
+            char_image_file = pathlib.Path("webapp") / char.image_path.lstrip("/")
+            if char_image_file.exists():
+                try:
+                    with open(char_image_file, "rb") as f:
+                        image_data = f.read()
+                    content_parts.append(
+                        genai_types.Part.from_bytes(
+                            data=image_data, mime_type="image/png"
+                        )
+                    )
+                    logger.info(f"Added reference image for {char.name}")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not load character image for {char.name}: {e}"
+                    )
+
+    logger.info(f"Generating scene image for scene {scene_id} in game {game_id}")
+
+    try:
+        from google.genai import types as genai_config  # type: ignore
+
+        # Try to configure landscape aspect ratio
+        config = genai_config.GenerateContentConfig(
+            response_modalities=["image"],
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-image-preview",
+            contents=content_parts,
+            config=config,
+        )
+    except (RuntimeError, ValueError, OSError) as e:
+        logger.warning(
+            f"Scene image generation request failed for scene {scene_id}: {e}"
+        )
+        return None
+
+    if response is not None:
+        try:
+            for part in response.candidates[0].content.parts:  # type: ignore[index]
+                if getattr(part, "inline_data", None) and getattr(
+                    part.inline_data, "data", None
+                ):
+                    img = Image.open(BytesIO(part.inline_data.data))
+                    filename = f"scene_{scene_id:03d}.png"
+                    image_file_path = scene_dir / filename
+                    img.save(image_file_path)
+                    logger.info(f"Saved scene image at {image_file_path}")
+                    return image_file_path
+        except (OSError, ValueError) as e:
+            logger.warning(
+                f"Failed to decode/save scene image for scene {scene_id}: {e}"
+            )
+            return None
+
+    return None
+
+
 async def generate_scenarios() -> list[str]:
     """Calls Google Gemini to generate scenarios."""
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
@@ -173,9 +318,12 @@ Provide a diverse set of classic fantasy archetypes.
 - strength, intelligence, agility: Stats between 1-20
 - backstory: 2-3 sentences about their history and what drives them (reference scenario context when relevant)
 - appearance: 2-3 sentences describing their physical look, clothing, and distinctive features
+- personality: 2-3 sentences about their personality traits, mannerisms, how they speak, and how they interact with others
+- skills: 3-5 specific skills or abilities (e.g., "Swordsmanship", "Lockpicking", "Persuasion", "Arcane Knowledge", "Tracking", "Healing", "Stealth")
 - inventory: 3-5 items they carry (weapons, tools, magical items, personal effects)
 
 Make each character distinctive and memorable with rich details that fit the scenario.
+Skills should match the character's background, stats, and archetype.
 """
     concept_result = await agent.run(prompt)
     generated_concepts = concept_result.output.characters
@@ -226,6 +374,8 @@ Make each character distinctive and memorable with rich details that fit the sce
             current_health=100,
             backstory=concept.backstory,
             appearance=concept.appearance,
+            personality=concept.personality,
+            skills=concept.skills,
             inventory=concept.inventory,
             image_path=(
                 f"/static/characters/{game_id}/{image_file_path.name}"
@@ -331,11 +481,27 @@ def _apply_character_updates(
 
         char.inventory = updated_char.inventory
 
-        # Update backstory and appearance if they changed (shouldn't normally change)
+        # Update skills (track changes like inventory)
+        old_skills = set(char.skills)
+        new_skills = set(updated_char.skills)
+
+        gained_skills = new_skills - old_skills
+        lost_skills = old_skills - new_skills
+
+        if gained_skills:
+            changes.append(f"Learned: {', '.join(gained_skills)}")
+        if lost_skills:
+            changes.append(f"Forgot: {', '.join(lost_skills)}")
+
+        char.skills = updated_char.skills
+
+        # Update backstory, appearance, and personality if they changed (shouldn't normally change)
         if char.backstory != updated_char.backstory:
             char.backstory = updated_char.backstory
         if char.appearance != updated_char.appearance:
             char.appearance = updated_char.appearance
+        if char.personality != updated_char.personality:
+            char.personality = updated_char.personality
 
         if changes:
             logger.info(f"Updated {char.name}: {', '.join(changes)}")
@@ -343,19 +509,22 @@ def _apply_character_updates(
     return characters
 
 
-def _make_scene(scene_id: int, scene_text: str, prompt) -> Scene:
+def _make_scene(
+    scene_id: int, scene_text: str, prompt, image_path: str | None = None
+) -> Scene:
     """Helper to create a Scene object from generated data.
 
     Args:
         scene_id: Unique scene identifier
         scene_text: The narrative text of the scene
         prompt: PromptType object from the generated scene
+        image_path: Optional path to the scene image
     """
     return Scene(
         id=scene_id,
         text=scene_text,
         prompt=prompt,
-        image_path=None,
+        image_path=image_path,
         voiceover_path=None,
     )
 
@@ -385,18 +554,25 @@ DICE CHECK RULES (when using dice_check type):
   * 2-3 dice: Multiple attempts, team effort, or more dramatic moments
   * 4+ dice: Epic moments, multiple characters acting together
 - Vary your dice choices - don't always use the same type and count!
+- Remember: The next scene will interpret the roll with stat modifiers (+2 for 16-20, +1 for 11-15, +0 for 6-10, -1 for 1-5) and skill bonuses
 
 TARGETING RULES:
-- Use target_character to address specific party members when their unique skills/abilities are relevant
-- Use null (entire party) when any character could respond or multiple characters should act together
+- Use target_character to address a single specific party member when their unique skills/abilities are relevant
+- Use target_characters (array) for dice_check prompts when multiple specific characters need to roll simultaneously
+  * Example: Combat where multiple characters attack at once
+  * Format: target_characters: ["Character1", "Character2"], target_character: null
+  * The prompt_text should mention each character and what they're rolling for
+- Use null for target_character (and omit target_characters) when entire party responds or any character could act
+- Consider each character's skills when creating prompts and challenges
 
 CRITICAL RULES FOR CHARACTER UPDATES:
 - ALWAYS return updated_characters array with ALL party members
-- Re-generate complete character data (stats, health, inventory) based on what happened in the scene
+- Re-generate complete character data (stats, health, skills, inventory) based on what happened in the scene
 - Update current_health for characters who took damage or were healed (keep stats same unless permanently changed)
+- Update skills if a character learns a new ability or loses one (rare, but possible)
 - Update inventory to reflect items gained, lost, used, or consumed
 - If nothing happened to a character, return them unchanged
-- Keep backstory and appearance the same (these don't change during adventures)
+- Keep backstory, appearance, and personality the same (these don't change during adventures)
 
 Return your response in this JSON structure:
 {
@@ -405,7 +581,8 @@ Return your response in this JSON structure:
     "type": "dialogue" | "action" | "dice_check",
     "dice_type": "d6" | "d10" (only if type is dice_check),
     "dice_count": 1 to 6 (only if type is dice_check),
-    "target_character": "Character Name" or null for entire party,
+    "target_character": "Character Name" or null (use for single character or entire party),
+    "target_characters": ["Char1", "Char2"] or null (use for multi-character dice_check only),
     "prompt_text": "The question or instruction for the player(s)"
   },
   "updated_characters": [
@@ -417,6 +594,8 @@ Return your response in this JSON structure:
       "current_health": current_health_value,
       "backstory": "same as before",
       "appearance": "same as before",
+      "personality": "same as before",
+      "skills": ["current", "skills", "list"],
       "inventory": ["current", "items", "list"]
     }
   ]
@@ -446,7 +625,64 @@ CRITICAL RULES FOR HANDLING PLAYER ACTIONS:
 """
 
 
+def _build_dice_check_resolution_rules() -> str:
+    """Returns rules for resolving dice check results."""
+    return """
+CRITICAL RULES FOR DICE CHECK RESOLUTION:
+When the previous prompt was a dice_check and the player provides their roll result(s):
+
+NOTE: For multi-character dice checks, the player will provide rolls in format: "CharacterName1: 7, CharacterName2: 4"
+Parse each character's roll separately and apply their individual modifiers.
+
+1. INTERPRET THE ROLL with character stat modifiers:
+   - For PHYSICAL actions (combat, climbing, swimming, breaking): Apply STRENGTH modifier
+     * Strength 16-20: +2 to roll
+     * Strength 11-15: +1 to roll
+     * Strength 6-10: +0 to roll
+     * Strength 1-5: -1 to roll
+   
+   - For MENTAL actions (arcane knowledge, puzzle solving, investigation): Apply INTELLIGENCE modifier
+     * Intelligence 16-20: +2 to roll
+     * Intelligence 11-15: +1 to roll
+     * Intelligence 6-10: +0 to roll
+     * Intelligence 1-5: -1 to roll
+   
+   - For DEXTERITY actions (lockpicking, dodging, stealth, acrobatics): Apply AGILITY modifier
+     * Agility 16-20: +2 to roll
+     * Agility 11-15: +1 to roll
+     * Agility 6-10: +0 to roll
+     * Agility 1-5: -1 to roll
+   
+   - For SOCIAL actions (persuasion, intimidation, deception): Apply INTELLIGENCE modifier (wit/charisma)
+
+2. APPLY SKILL BONUSES:
+   - If the character has a relevant skill, add +1 to the final result
+   - Examples: "Lockpicking" skill for picking locks, "Swordsmanship" for melee combat, "Persuasion" for social checks
+
+3. DETERMINE SUCCESS:
+   - Calculate: Roll + Stat Modifier + Skill Bonus (if applicable)
+   - For d6 checks: 4+ is success, 6+ is critical success, 2 or less is critical failure
+   - For d10 checks: 6+ is success, 9+ is critical success, 3 or less is critical failure
+   - Multiple dice: Sum all dice, then apply modifiers once to the total
+
+4. NARRATE THE RESULT:
+   - Explicitly mention the stat modifier and skill bonus in your narrative
+   - Example format: "You rolled a 4. With your high Strength (+2) and relevant skill (+1), that's a total of 7 - a solid success!"
+   - Example format: "You rolled a 3. Despite your Agility modifier (+1), you barely manage..."
+   - Make outcomes dramatic and descriptive
+   - Critical successes should have extra benefits
+   - Critical failures should have interesting consequences
+
+5. UPDATE CHARACTER STATE:
+   - Successful combat: Enemy takes damage, may gain items/information
+   - Failed combat: Character loses health (appropriate to danger level)
+   - Successful skill checks: Progress story, gain items/allies/knowledge
+   - Failed skill checks: Setbacks, complications, but not instant death unless extremely dangerous
+"""
+
+
 async def generate_opening_scene(
+    game_id: str,
     scenario_name: str,
     scenario_details: str,
     characters: List[Character],
@@ -455,6 +691,7 @@ async def generate_opening_scene(
     """Generate the opening scene for the chosen scenario.
 
     Args:
+        game_id: Unique identifier for the game (for image storage)
         scenario_name: Name of the chosen scenario
         scenario_details: Full markdown details about the scenario
         characters: List of Character objects in the party (with full stats, inventory, backstory)
@@ -477,6 +714,8 @@ async def generate_opening_scene(
             f"- Health: {char.current_health}/{char.maximum_health}\n"
             f"- Backstory: {char.backstory}\n"
             f"- Appearance: {char.appearance}\n"
+            f"- Personality: {char.personality}\n"
+            f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
             f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'}"
             for char in characters
         ]
@@ -497,8 +736,8 @@ Generate the opening scene for this adventure. Create an engaging, atmospheric i
 1. Sets the scene and mood
 2. Introduces the immediate situation
 3. Gives players a clear hook into the adventure
-4. References the party members naturally (consider their backstories, appearance, and capabilities)
-5. Be aware of their current stats, health, and inventory when setting up situations
+4. References the party members naturally (consider their backstories, appearance, personality, skills, and capabilities)
+5. Be aware of their current stats, health, skills, and inventory when setting up situations
 
 {_build_scene_generation_prompt_rules()}
 
@@ -513,11 +752,32 @@ Make the scene immersive and exciting!
         characters, generated.updated_characters
     )
 
-    scene = _make_scene(scene_id, generated.scene_text, generated.prompt)
+    # Generate scene image in background thread
+    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
+    image_file_path = await asyncio.to_thread(
+        _generate_scene_image_sync,
+        client,
+        game_id,
+        scene_id,
+        generated.scene_text,
+        characters,
+        scenario_name,
+        None,  # No previous scene for opening scene
+    )
+
+    # Convert to web path if image was generated
+    image_web_path = None
+    if image_file_path:
+        image_web_path = f"/static/scenes/{game_id}/{image_file_path.name}"
+
+    scene = _make_scene(
+        scene_id, generated.scene_text, generated.prompt, image_web_path
+    )
     return scene, updated_characters
 
 
 async def generate_next_scene(
+    game_id: str,
     scenario_name: str,
     scenario_details: str,
     characters: List[Character],
@@ -528,6 +788,7 @@ async def generate_next_scene(
     """Generate the next scene based on the story so far and player action.
 
     Args:
+        game_id: Unique identifier for the game (for image storage)
         scenario_name: Name of the scenario
         scenario_details: Full markdown details about the scenario
         characters: List of Character objects in the party (with full stats, inventory, backstory)
@@ -553,6 +814,8 @@ async def generate_next_scene(
             f"- Health: {char.current_health}/{char.maximum_health}\n"
             f"- Backstory: {char.backstory}\n"
             f"- Appearance: {char.appearance}\n"
+            f"- Personality: {char.personality}\n"
+            f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
             f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'}"
             for char in characters
         ]
@@ -597,6 +860,13 @@ async def generate_next_scene(
         f"\n\nCURRENT PLAYER ACTION: {player_action}" if player_action else ""
     )
 
+    # Check if the last prompt was a dice_check to include resolution rules
+    dice_check_rules = ""
+    if conversation_history and len(conversation_history) > 0:
+        last_entry = conversation_history[-1]
+        if last_entry.get("prompt") and last_entry["prompt"].type == "dice_check":
+            dice_check_rules = f"\n\n{_build_dice_check_resolution_rules()}"
+
     prompt = f"""
 You are a creative Dungeon Master for a D&D-style adventure.
 
@@ -608,16 +878,17 @@ SCENARIO DETAILS:
 PARTY CHARACTER SHEETS:
 {character_sheets}
 
-{history_context}{action_context}
+{history_context}{action_context}{dice_check_rules}
 
 Generate the next scene in this adventure. The scene should:
 1. Respond naturally to the player's action (if provided)
 2. Advance the story toward the main quest
 3. Introduce new challenges, discoveries, or NPCs as appropriate
 4. Maintain tension and engagement
-5. Reference party members when relevant (consider their backstories, appearance, and capabilities)
-6. Be aware of their CURRENT stats, health, and inventory - check if they actually have items they try to use
+5. Reference party members when relevant (consider their backstories, appearance, personality, skills, and capabilities)
+6. Be aware of their CURRENT stats, health, skills, and inventory - check if they actually have items they try to use
 7. Adjust challenge difficulty based on party's current health and capabilities
+8. Create opportunities for characters to use their unique skills
 
 {_build_impossible_action_rules()}
 
@@ -634,5 +905,31 @@ Continue the adventure!
         characters, generated.updated_characters
     )
 
-    scene = _make_scene(next_id, generated.scene_text, generated.prompt)
+    # Generate scene image in background thread
+    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
+
+    # Construct path to previous scene image for visual continuity
+    previous_scene_image_path = None
+    if last_scene_id >= 1:
+        previous_scene_image_path = (
+            SCENE_IMAGE_DIR / game_id / f"scene_{last_scene_id:03d}.png"
+        )
+
+    image_file_path = await asyncio.to_thread(
+        _generate_scene_image_sync,
+        client,
+        game_id,
+        next_id,
+        generated.scene_text,
+        characters,
+        scenario_name,
+        previous_scene_image_path,
+    )
+
+    # Convert to web path if image was generated
+    image_web_path = None
+    if image_file_path:
+        image_web_path = f"/static/scenes/{game_id}/{image_file_path.name}"
+
+    scene = _make_scene(next_id, generated.scene_text, generated.prompt, image_web_path)
     return scene, updated_characters

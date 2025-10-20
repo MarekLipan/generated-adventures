@@ -23,6 +23,13 @@ class Character(BaseModel):
         ..., description="Character's background story and motivations"
     )
     appearance: str = Field(..., description="Physical description of the character")
+    personality: str = Field(
+        ..., description="Character's personality traits, mannerisms, and demeanor"
+    )
+    skills: List[str] = Field(
+        default_factory=list,
+        description="List of skills and abilities the character possesses",
+    )
     inventory: List[str] = Field(
         default_factory=list, description="List of items the character carries"
     )
@@ -48,7 +55,11 @@ class PromptType(BaseModel):
     )
     target_character: Optional[str] = Field(
         None,
-        description="Name of specific character being prompted, or None for entire party",
+        description="Name of specific character being prompted, or None for entire party. For multi-character dice checks, use target_characters instead.",
+    )
+    target_characters: Optional[List[str]] = Field(
+        None,
+        description="List of character names for multi-character dice_check prompts. Use this when multiple specific characters need to roll dice simultaneously.",
     )
     prompt_text: str = Field(
         ...,
@@ -127,6 +138,14 @@ class GeneratedCharacter(BaseModel):
     appearance: str = Field(
         ...,
         description="A 2-3 sentence physical description including clothing, build, and distinctive features",
+    )
+    personality: str = Field(
+        ...,
+        description="A 2-3 sentence description of the character's personality, mannerisms, and how they interact with others",
+    )
+    skills: List[str] = Field(
+        ...,
+        description="3-5 skills or abilities the character possesses (e.g., 'Lockpicking', 'Persuasion', 'Swordsmanship', 'Arcane Knowledge', 'Tracking')",
     )
     inventory: List[str] = Field(
         ...,
