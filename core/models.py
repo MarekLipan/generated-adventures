@@ -3,7 +3,7 @@
 import uuid
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Character(BaseModel):
@@ -55,16 +55,40 @@ class PromptType(BaseModel):
     )
     target_character: Optional[str] = Field(
         None,
-        description="Name of specific character being prompted, or None for entire party. For multi-character dice checks, use target_characters instead.",
+        description="Name of specific character being prompted. REQUIRED (not None) for single-character dice_check prompts. Use None only for dialogue/action prompts where entire party acts together. For multi-character dice checks, use target_characters instead and set this to None.",
     )
     target_characters: Optional[List[str]] = Field(
         None,
-        description="List of character names for multi-character dice_check prompts. Use this when multiple specific characters need to roll dice simultaneously.",
+        description="List of character names for multi-character dice_check prompts where multiple specific characters roll simultaneously. When using this, set target_character to None.",
     )
     prompt_text: str = Field(
         ...,
         description="The actual prompt/question to present to the player(s)",
     )
+
+    @model_validator(mode="after")
+    def validate_dice_check_targeting(self) -> "PromptType":
+        """Ensure dice_check prompts always have a target specified."""
+        if self.type == "dice_check":
+            # For dice checks, we must have either target_character OR target_characters
+            has_single_target = self.target_character is not None
+            has_multi_target = (
+                self.target_characters is not None and len(self.target_characters) > 0
+            )
+
+            if not has_single_target and not has_multi_target:
+                raise ValueError(
+                    "dice_check prompts must specify either 'target_character' (for single character) "
+                    "or 'target_characters' (for multiple characters). Cannot have both as None."
+                )
+
+            if has_single_target and has_multi_target:
+                raise ValueError(
+                    "dice_check prompts cannot specify both 'target_character' and 'target_characters'. "
+                    "Use only one: target_character for single character, target_characters for multiple."
+                )
+
+        return self
 
 
 class Scene(BaseModel):

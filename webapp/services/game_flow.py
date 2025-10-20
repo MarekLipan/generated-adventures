@@ -26,7 +26,16 @@ def show_dm_notes_enabled() -> bool:
 
 
 async def generate_scenarios() -> List[str]:
-    return await generator.generate_scenarios()
+    """Generate new scenarios, avoiding previously played ones."""
+    # Get list of previously played scenario names
+    saved_games = persistence.list_saved_games()
+    previously_played = [
+        scenario_name
+        for _, scenario_name, _ in saved_games
+        if scenario_name != "Unknown Scenario"
+    ]
+
+    return await generator.generate_scenarios(previously_played=previously_played)
 
 
 async def generate_and_set_details(game_id: str) -> None:

@@ -158,14 +158,19 @@ def _generate_scene_image_sync(
         f"\n{scene_text}\n",
         f"Scenario: {scenario_name}",
         "\nIMPORTANT CHARACTER INSTRUCTIONS:",
+        "- Characters should appear NATURALLY in the scene with varied angles and perspectives",
+        "- DO NOT default to frontal/portrait poses - use three-quarter views, side angles, back views, or dynamic angles as appropriate",
         "- Characters should have DYNAMIC poses and body language that match the action/emotion of the scene",
-        "- Show appropriate facial expressions and emotions (fear, determination, excitement, etc.)",
-        "- Position characters naturally engaged in the scene's action, not standing static",
-        "- If combat/action: show fighting stances, movement, tension",
-        "- If dialogue/social: show gestures, interactions between characters",
-        "- If exploration: show characters examining, pointing, reacting to environment",
+        "- Show appropriate facial expressions when faces are visible (fear, determination, excitement, etc.)",
+        "- Position characters naturally engaged in the scene's action, not standing static or posed for camera",
+        "- Vary character positioning: some closer, some farther, some partially visible, creating depth",
+        "- If combat/action: show fighting stances, movement, tension, characters in mid-action",
+        "- If dialogue/social: show characters facing each other, gesturing, natural conversation poses",
+        "- If exploration: show characters examining objects, pointing, reacting to environment, looking around",
         "- Match each character's personality traits, mannerisms, and nature to their pose, expression, and body language",
-        "- Use the character reference images for appearance (the images have personality context embedded)",
+        "- Characters can be shown from any angle that serves the scene: side view, back view, three-quarter, profile, etc.",
+        "- Use the character reference images ONLY for appearance details (face, clothing, build) - NOT for pose or angle",
+        "- Create a cinematic, immersive scene where characters are part of the action, not posing for portraits",
     ]
 
     # Add note about previous scene if available
@@ -262,16 +267,40 @@ def _generate_scene_image_sync(
     return None
 
 
-async def generate_scenarios() -> list[str]:
-    """Calls Google Gemini to generate scenarios."""
+async def generate_scenarios(previously_played: list[str] | None = None) -> list[str]:
+    """Calls Google Gemini to generate scenarios.
+
+    Args:
+        previously_played: Optional list of scenario names that were already played,
+                          to ensure new scenarios are unique and distinct.
+    """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
     agent = Agent(model=model, output_type=GeneratedScenarios)
 
-    logger.info("Generating scenarios...")
-    result = await agent.run(
-        "Generate three distinct fantasy adventure scenarios. Provide only the names.",
+    # Build prompt with context about previously played scenarios
+    prompt = (
+        "Generate three distinct fantasy adventure scenarios. Provide only the names."
     )
+
+    if previously_played:
+        previously_played_list = "\n".join(
+            f"- {scenario}" for scenario in previously_played
+        )
+        prompt = f"""Generate three NEW and distinct fantasy adventure scenarios.
+
+IMPORTANT: The following scenarios have ALREADY been played. Your new scenarios must be completely different and unique:
+
+{previously_played_list}
+
+Generate three fresh, creative fantasy adventure scenarios that are distinct from the ones listed above. 
+Consider different themes, settings, conflict types, and narrative hooks.
+Provide only the scenario names."""
+
+    logger.info(
+        f"Generating scenarios (avoiding {len(previously_played or [])} previously played)..."
+    )
+    result = await agent.run(prompt)
 
     return result.output.scenarios
 
@@ -556,14 +585,25 @@ DICE CHECK RULES (when using dice_check type):
 - Vary your dice choices - don't always use the same type and count!
 - Remember: The next scene will interpret the roll with stat modifiers (+2 for 16-20, +1 for 11-15, +0 for 6-10, -1 for 1-5) and skill bonuses
 
-TARGETING RULES:
-- Use target_character to address a single specific party member when their unique skills/abilities are relevant
-- Use target_characters (array) for dice_check prompts when multiple specific characters need to roll simultaneously
-  * Example: Combat where multiple characters attack at once
-  * Format: target_characters: ["Character1", "Character2"], target_character: null
-  * The prompt_text should mention each character and what they're rolling for
-- Use null for target_character (and omit target_characters) when entire party responds or any character could act
-- Consider each character's skills when creating prompts and challenges
+TARGETING RULES (CRITICAL - READ CAREFULLY):
+For dice_check prompts specifically:
+  * ALWAYS specify target_character (single name) OR target_characters (array of names)
+  * NEVER use target_character: null for dice_check prompts - this causes confusion about who rolls
+  * If one character should attempt the check, use target_character with their name
+    - Example: "target_character": "Kaelen Wind-Caller" for persuasion check
+  * If multiple specific characters should roll simultaneously, use target_characters array
+    - Example: "target_characters": ["Character1", "Character2"] for group combat
+  * If the situation is "any character could volunteer," pick the most suitable character based on their skills/stats
+    - Example: For persuasion, pick the character with highest Intelligence or relevant skills
+  * Make your prompt_text match your targeting:
+    - Single target: "Kaelen, roll d10 to persuade the elder"
+    - Multiple targets: "Kaelen and Sera, both roll d6 for your attacks"
+
+For dialogue and action prompts:
+  * Use target_character with a name to address a specific character
+  * Use target_character: null when the entire party responds together or any character can act
+  
+CRITICAL: For ANY dice_check prompt, you MUST set either target_character (string) or target_characters (array). Never null.
 
 CRITICAL RULES FOR CHARACTER UPDATES:
 - ALWAYS return updated_characters array with ALL party members
@@ -581,8 +621,8 @@ Return your response in this JSON structure:
     "type": "dialogue" | "action" | "dice_check",
     "dice_type": "d6" | "d10" (only if type is dice_check),
     "dice_count": 1 to 6 (only if type is dice_check),
-    "target_character": "Character Name" or null (use for single character or entire party),
-    "target_characters": ["Char1", "Char2"] or null (use for multi-character dice_check only),
+    "target_character": "Character Name" (REQUIRED for single dice_check) or null (for dialogue/action to entire party),
+    "target_characters": ["Char1", "Char2"] (for multi-character dice_check) or null,
     "prompt_text": "The question or instruction for the player(s)"
   },
   "updated_characters": [
