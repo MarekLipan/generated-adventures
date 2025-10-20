@@ -8,11 +8,25 @@ from .character_display import render_character_cards  # type: ignore
 async def start_adventure(main_container, game_id: str):
     def render_scene(scene):
         main_container.clear()
-        with main_container:
-            # Scene content
-            ui.label(f"Scene {scene.id}").classes("text-h5 mb-4")
 
-            ui.markdown(scene.text).classes("w-full text-left mb-6")
+        # Get game state for scenario name
+        game_state = game_flow.get_game_state(game_id)
+
+        with main_container:
+            with ui.card().classes("fantasy-panel w-full max-w-4xl"):
+                # Scenario title at the top
+                if game_state and game_state.scenario_name:
+                    ui.label(f"📜 {game_state.scenario_name}").classes(
+                        "text-h4 mb-2 fantasy-text-gold text-center"
+                    )
+                    ui.html('<div class="ornate-divider"></div>')
+
+                # Scene content
+                ui.label(f"⚔️ Scene {scene.id}").classes(
+                    "text-h5 mb-4 fantasy-text-gold"
+                )
+
+                ui.markdown(scene.text).classes("markdown w-full text-left mb-6")
 
             # Display scene image if available
             if scene.image_path:
@@ -21,7 +35,7 @@ async def start_adventure(main_container, game_id: str):
                 )
 
             # Action input - dynamically rendered based on prompt type
-            ui.separator().classes("my-4")
+            ui.html('<div class="ornate-divider"></div>')
 
             # Get prompt information
             prompt = scene.prompt
@@ -37,8 +51,8 @@ async def start_adventure(main_container, game_id: str):
 
             # Display the prompt
             target_label = f"{target_character}" if target_character else "Party"
-            ui.label(f"{target_label}: {prompt_text}").classes(
-                "text-lg font-semibold mb-2"
+            ui.label(f"🎯 {target_label}: {prompt_text}").classes(
+                "text-lg font-semibold mb-4 fantasy-text-gold"
             )
 
             # Render appropriate input based on prompt type
@@ -68,7 +82,7 @@ async def start_adventure(main_container, game_id: str):
                 if has_multiple_targets:
                     # Multiple character dice inputs
                     ui.label(f"🎲 Each character rolls {dice_display}:").classes(
-                        "text-sm text-gray-600 mb-2"
+                        "text-sm fantasy-text-muted mb-3 stat-label"
                     )
                     for char_name in prompt.target_characters:
                         character_dice_inputs[char_name] = ui.number(
@@ -79,7 +93,7 @@ async def start_adventure(main_container, game_id: str):
                 else:
                     # Single dice input
                     ui.label(f"🎲 Roll {dice_display} and enter the result:").classes(
-                        "text-sm text-gray-600 mb-2"
+                        "text-sm fantasy-text-muted mb-3 stat-label"
                     )
                     action_input = ui.number(
                         label="Dice Result",
@@ -91,7 +105,7 @@ async def start_adventure(main_container, game_id: str):
                 # Dialogue input - will be wrapped in quotes
                 ui.label(
                     "💬 Enter what your character says (quotes will be added automatically):"
-                ).classes("text-sm text-gray-600 mb-2")
+                ).classes("text-sm fantasy-text-muted mb-3 stat-label")
                 action_input = ui.input(
                     label="Dialogue", placeholder="What do you say?"
                 ).classes("w-full")
@@ -99,7 +113,7 @@ async def start_adventure(main_container, game_id: str):
             else:  # action
                 # Standard action input
                 ui.label("⚔️ Describe your action:").classes(
-                    "text-sm text-gray-600 mb-2"
+                    "text-sm fantasy-text-muted mb-3 stat-label"
                 )
                 action_input = ui.input(
                     label="Action", placeholder="What do you do?"
@@ -128,26 +142,29 @@ async def start_adventure(main_container, game_id: str):
                 # Show loading indicator
                 main_container.clear()
                 with main_container:
-                    ui.label("Generating next scene...").classes("text-h5 mb-4")
-                    ui.spinner(size="lg")
-                    ui.label("🎲 The Dungeon Master is crafting your story...").classes(
-                        "text-gray-600 mt-4"
-                    )
+                    with ui.card().classes("fantasy-panel"):
+                        ui.label("🎲 Generating Next Scene...").classes("text-h5 mb-4")
+                        ui.spinner(size="lg")
+                        ui.label(
+                            "The Dungeon Master is crafting your story..."
+                        ).classes("loading-message mt-4")
 
                 next_scene = await game_flow.advance_scene(game_id, player_action)
                 if next_scene:
                     render_scene(next_scene)
                 else:
                     main_container.clear()
-                    ui.label("No further scenes.")
+                    with ui.card().classes("fantasy-panel"):
+                        ui.label("📜 The Tale Concludes").classes("text-h5")
+                        ui.label("No further scenes.").classes("loading-message mt-2")
 
-            ui.button("Submit", on_click=on_submit).classes("mt-4 mb-6")
+            ui.button("⚔️ Submit", on_click=on_submit).classes("mt-4 mb-6 w-full")
 
             # Party Status section - after action input
             game_state = game_flow.get_game_state(game_id)
             if game_state and game_state.characters:
-                ui.separator().classes("my-6")
-                ui.label("Party Status").classes("text-h6 mb-3")
+                ui.html('<div class="ornate-divider"></div>')
+                ui.label("👥 Party Status").classes("text-h6 mb-4 fantasy-text-gold")
 
                 # Render character cards with expandable sections
                 render_character_cards(game_state.characters)
@@ -157,11 +174,12 @@ async def start_adventure(main_container, game_id: str):
         # Show loading indicator for opening scene generation
         main_container.clear()
         with main_container:
-            ui.label("Starting your adventure...").classes("text-h5 mb-4")
-            ui.spinner(size="lg")
-            ui.label("🎲 The Dungeon Master is preparing the opening scene...").classes(
-                "text-gray-600 mt-4"
-            )
+            with ui.card().classes("fantasy-panel"):
+                ui.label("🎲 Starting Your Adventure...").classes("text-h5 mb-4")
+                ui.spinner(size="lg")
+                ui.label(
+                    "The Dungeon Master is preparing the opening scene..."
+                ).classes("loading-message mt-4")
 
         await game_flow.generate_opening_scene(game_id)
         current = game_flow.get_current_scene(game_id)
@@ -169,4 +187,8 @@ async def start_adventure(main_container, game_id: str):
         render_scene(current)
     else:
         main_container.clear()
-        ui.label("Unable to start the adventure: no scene available.")
+        with ui.card().classes("fantasy-panel"):
+            ui.label("⚠️ Unable to Start").classes("text-h5")
+            ui.label("Unable to start the adventure: no scene available.").classes(
+                "loading-message mt-2"
+            )

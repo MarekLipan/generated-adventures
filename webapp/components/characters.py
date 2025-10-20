@@ -30,11 +30,12 @@ async def show_characters(
             # Show loading indicator
             main_container.clear()
             with main_container:
-                ui.label("Generating characters...").classes("text-h5 mb-4")
-                ui.spinner(size="lg")
-                ui.label("✨ Creating unique heroes for your adventure...").classes(
-                    "text-gray-600 mt-4"
-                )
+                with ui.card().classes("fantasy-panel"):
+                    ui.label("✨ Generating Characters...").classes("text-h5 mb-4")
+                    ui.spinner(size="lg")
+                    ui.label("Creating unique heroes for your adventure...").classes(
+                        "loading-message mt-4"
+                    )
 
             logger.info("Starting character generation with scenario context...")
             all_characters: List[Character] = await game_flow.generate_characters(
@@ -50,8 +51,11 @@ async def show_characters(
             logger.error(f"Error generating characters: {e}", exc_info=True)
             main_container.clear()
             with main_container:
-                ui.label("Error generating characters").classes("text-h4 text-red")
-                ui.label(str(e)).classes("text-sm")
+                with ui.card().classes("fantasy-panel"):
+                    ui.label("⚠️ Error Generating Characters").classes(
+                        "text-h4 fantasy-accent-red"
+                    )
+                    ui.label(str(e)).classes("text-sm fantasy-text-muted")
             return
     else:
         logger.info(f"Using cached characters: {len(cached_characters)} available")
@@ -63,40 +67,43 @@ async def show_characters(
     logger.info(f"Displaying {len(available)} available characters for selection")
     main_container.clear()
     with main_container:
-        ui.label(
-            f"Choose Character ({len(game_state.characters)}/{game_state.players})"
-        ).classes("text-h4")
-        with ui.grid(columns=2).classes("w-full gap-6 mt-4"):
-            for character in available:
-                with ui.card().classes("w-full max-w-2xl"):
-                    with ui.row().classes("w-full gap-4"):
-                        # Left column: Image
-                        if character.image_path:
-                            ui.image(character.image_path).classes(
-                                "w-48 h-64 object-cover rounded"
-                            )
-                        else:
-                            ui.label("No Image").classes(
-                                "w-48 h-64 flex items-center justify-center bg-gray-200 rounded"
-                            )
+        with ui.card().classes("fantasy-panel w-full"):
+            ui.label(
+                f"⚔️ Choose Your Heroes ({len(game_state.characters)}/{game_state.players})"
+            ).classes("text-h4 mb-6")
+            with ui.grid(columns=2).classes("w-full gap-6 mt-4"):
+                for character in available:
+                    with ui.card().classes("character-card w-full max-w-2xl"):
+                        with ui.row().classes("w-full gap-4"):
+                            # Left column: Image
+                            if character.image_path:
+                                ui.image(character.image_path).classes(
+                                    "w-48 h-64 object-cover rounded"
+                                )
+                            else:
+                                ui.label("🎭 No Image").classes(
+                                    "w-48 h-64 flex items-center justify-center rounded fantasy-text-muted"
+                                )
 
                         # Right column: Character details
                         with ui.column().classes("flex-1"):
-                            ui.label(character.name).classes("text-h6 font-bold mb-2")
+                            ui.label(character.name).classes(
+                                "text-h6 font-bold mb-2 fantasy-text-gold"
+                            )
 
                             # Stats row
                             with ui.row().classes("gap-4 mb-3"):
                                 ui.label(f"💪 STR: {character.strength}").classes(
-                                    "text-sm font-semibold"
+                                    "text-sm font-semibold stat-label"
                                 )
                                 ui.label(f"🧠 INT: {character.intelligence}").classes(
-                                    "text-sm font-semibold"
+                                    "text-sm font-semibold stat-label"
                                 )
                                 ui.label(f"⚡ AGI: {character.agility}").classes(
-                                    "text-sm font-semibold"
+                                    "text-sm font-semibold stat-label"
                                 )
                                 ui.label(f"❤️ HP: {character.current_health}").classes(
-                                    "text-sm font-semibold"
+                                    "text-sm font-semibold stat-label"
                                 )
 
                             # Appearance
@@ -105,22 +112,40 @@ async def show_characters(
                             ):
                                 ui.label(character.appearance).classes("text-sm")
 
+                            # Personality
+                            with ui.expansion("Personality", icon="psychology").classes(
+                                "w-full mb-2"
+                            ):
+                                ui.label(character.personality).classes("text-sm")
+
                             # Backstory
                             with ui.expansion("Backstory", icon="book").classes(
                                 "w-full mb-2"
                             ):
                                 ui.label(character.backstory).classes("text-sm")
 
+                            # Skills
+                            with ui.expansion("Skills", icon="star").classes(
+                                "w-full mb-2"
+                            ):
+                                if character.skills:
+                                    for skill in character.skills:
+                                        ui.label(f"⚡ {skill}").classes("text-sm ml-2")
+                                else:
+                                    ui.label("No special skills").classes(
+                                        "text-sm fantasy-text-muted"
+                                    )
+
                             # Inventory
                             with ui.expansion("Inventory", icon="backpack").classes(
                                 "w-full mb-2"
                             ):
                                 for item in character.inventory:
-                                    ui.label(f"• {item}").classes("text-sm ml-2")
+                                    ui.label(f"🎒 {item}").classes("text-sm ml-2")
 
                             # Select button
                             ui.button(
-                                "Select This Character",
+                                "⚔️ Select This Hero",
                                 on_click=lambda _e=None,
                                 c=character: asyncio.create_task(
                                     select_character(

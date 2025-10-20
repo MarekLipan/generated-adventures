@@ -25,10 +25,14 @@ async def show_dm_notes_before_characters(
 
     logger.info("Displaying DM notes")
     with main_container:
-        ui.markdown(game_state.scenario_details).classes("w-full text-left")
-        ui.button(
-            "Continue to Character Selection",
-            on_click=lambda: asyncio.create_task(
-                show_characters(main_container, game_id, scenario_name)
-            ),
-        ).classes("mt-4")
+        with ui.card().classes("fantasy-panel w-full max-w-4xl"):
+            ui.label("📜 Dungeon Master's Notes").classes("text-h4 mb-6")
+            ui.markdown(game_state.scenario_details).classes(
+                "markdown w-full text-left mb-4"
+            )
+            ui.button(
+                "⚔️ Continue to Character Selection",
+                on_click=lambda: asyncio.create_task(
+                    show_characters(main_container, game_id, scenario_name)
+                ),
+            ).classes("mt-6 w-full")

@@ -22,14 +22,15 @@ def show_character_overview(main_container, game_id: str):
 
     logger.info(f"Displaying party with {len(game_state.characters)} characters")
     with main_container:
-        ui.label("Your Party is Ready!").classes("text-h4 mb-4")
+        with ui.card().classes("fantasy-panel w-full max-w-4xl"):
+            ui.label("⚔️ Your Party is Ready!").classes("text-h4 mb-6")
 
-        # Render character cards
-        render_character_cards(game_state.characters)
+            # Render character cards
+            render_character_cards(game_state.characters)
 
-        ui.button(
-            "Start Adventure!",
-            on_click=lambda _e=None: asyncio.create_task(
-                start_adventure(main_container, game_id)
-            ),
-        ).classes("mt-4 text-lg")
+            ui.button(
+                "🎲 Begin the Adventure!",
+                on_click=lambda _e=None: asyncio.create_task(
+                    start_adventure(main_container, game_id)
+                ),
+            ).classes("mt-6 text-lg w-full")

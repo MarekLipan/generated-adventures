@@ -15,22 +15,26 @@ async def show_scenarios(main_container, game_id: str):
     # Show loading indicator while generating scenarios
     main_container.clear()
     with main_container:
-        ui.label("Generating scenarios...").classes("text-h5 mb-4")
-        ui.spinner(size="lg")
-        ui.label("🗺️ Creating adventure scenarios...").classes("text-gray-600 mt-4")
+        with ui.card().classes("fantasy-panel"):
+            ui.label("🎲 Generating Scenarios...").classes("text-h5 mb-4")
+            ui.spinner(size="lg")
+            ui.label("The Dungeon Master is preparing epic tales...").classes(
+                "loading-message mt-4"
+            )
 
     scenarios = await game_flow.generate_scenarios()
     main_container.clear()
     with main_container:
-        ui.label("Choose a Scenario").classes("text-h4")
-        with ui.row():
-            for scenario in scenarios:
-                ui.button(
-                    scenario,
-                    on_click=lambda _event=None, s=scenario: asyncio.create_task(
-                        handle_scenario_selection(main_container, game_id, s)
-                    ),
-                )
+        with ui.card().classes("fantasy-panel"):
+            ui.label("🗺️ Choose Your Adventure").classes("text-h4 mb-6")
+            with ui.column().classes("gap-3"):
+                for scenario in scenarios:
+                    ui.button(
+                        f"⚔️ {scenario}",
+                        on_click=lambda _event=None, s=scenario: asyncio.create_task(
+                            handle_scenario_selection(main_container, game_id, s)
+                        ),
+                    ).classes("w-full text-left")
 
 
 async def handle_scenario_selection(main_container, game_id: str, scenario_name: str):
@@ -40,11 +44,12 @@ async def handle_scenario_selection(main_container, game_id: str, scenario_name:
     # Show loading indicator while generating scenario details
     main_container.clear()
     with main_container:
-        ui.label("Generating scenario details...").classes("text-h5 mb-4")
-        ui.spinner(size="lg")
-        ui.label("📜 The Dungeon Master is preparing the story...").classes(
-            "text-gray-600 mt-4"
-        )
+        with ui.card().classes("fantasy-panel"):
+            ui.label("📜 Preparing Your Quest...").classes("text-h5 mb-4")
+            ui.spinner(size="lg")
+            ui.label("The Dungeon Master is weaving your tale...").classes(
+                "loading-message mt-4"
+            )
 
     logger.info("Generating scenario details...")
     await game_flow.generate_and_set_details(game_id)

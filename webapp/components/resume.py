@@ -18,7 +18,10 @@ async def resume_game(main_container, game_id: str):
     if not game_state:
         main_container.clear()
         with main_container:
-            ui.label("Error: Could not load game state.").classes("text-red")
+            with ui.card().classes("fantasy-panel"):
+                ui.label("⚠️ Error: Could not load game state.").classes(
+                    "text-h5 fantasy-accent-red"
+                )
         return
 
     # Determine where to resume based on game state
