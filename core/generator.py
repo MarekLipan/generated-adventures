@@ -571,37 +571,39 @@ After the scene narrative, provide a prompt for player interaction. The prompt s
 CRITICAL RULES FOR PROMPT TYPES - VARY THE PROMPTS:
 - DO NOT use dice_check for every scene - mix dialogue, action, and dice_check
 - Use dialogue when: characters need to talk to NPCs, negotiate, roleplay conversations
-- Use action for: simple tasks, exploration without immediate danger, planning, easy skill checks
+- Use action for: simple tasks, exploration without immediate danger, planning, easy skill checks, or coordinated team efforts
 - Use dice_check for: combat, risky actions, difficult skill checks, life-or-death situations
 
 DICE CHECK RULES (when using dice_check type):
+- ALWAYS single die roll (either d6 or d10)
 - Choose dice type based on difficulty:
   * d6: Simple to moderate challenges (lockpicking, climbing, basic combat)
   * d10: Challenging situations (difficult combat, dangerous magic, persuading hostile NPCs)
-- Choose dice count based on the situation:
-  * 1 die: Single character making one attempt
-  * 2-3 dice: Multiple attempts, team effort, or more dramatic moments
-  * 4+ dice: Epic moments, multiple characters acting together
-- Vary your dice choices - don't always use the same type and count!
 - Remember: The next scene will interpret the roll with stat modifiers (+2 for 16-20, +1 for 11-15, +0 for 6-10, -1 for 1-5) and skill bonuses
+- Each character targeted will roll their own single die
 
 TARGETING RULES (CRITICAL - READ CAREFULLY):
 For dice_check prompts specifically:
   * ALWAYS specify target_character (single name) OR target_characters (array of names)
   * NEVER use target_character: null for dice_check prompts - this causes confusion about who rolls
   * If one character should attempt the check, use target_character with their name
-    - Example: "target_character": "Kaelen Wind-Caller" for persuasion check
+    - Example: "target_character": "Theron the Brave" (use the ACTUAL character name from the party)
   * If multiple specific characters should roll simultaneously, use target_characters array
-    - Example: "target_characters": ["Character1", "Character2"] for group combat
+    - Example: "target_characters": ["ActualName1", "ActualName2"] (use ACTUAL names from the party roster)
   * If the situation is "any character could volunteer," pick the most suitable character based on their skills/stats
     - Example: For persuasion, pick the character with highest Intelligence or relevant skills
   * Make your prompt_text match your targeting:
-    - Single target: "Kaelen, roll d10 to persuade the elder"
-    - Multiple targets: "Kaelen and Sera, both roll d6 for your attacks"
+    - Single target: "[CharacterName], roll d10 to persuade the elder" (use their actual name)
+    - Multiple targets: "[Name1] and [Name2], both roll d6 for your attacks" (use their actual names)
 
-For dialogue and action prompts:
+For action prompts:
+  * Can use target_character for single character actions
+  * Can use target_characters for coordinated multi-character actions (e.g., "[Name1] searches left, [Name2] searches right" - use actual party member names)
+  * Use target_character: null when the entire party acts together
+
+For dialogue prompts:
   * Use target_character with a name to address a specific character
-  * Use target_character: null when the entire party responds together or any character can act
+  * Use target_character: null when the entire party speaks/responds
   
 CRITICAL: For ANY dice_check prompt, you MUST set either target_character (string) or target_characters (array). Never null.
 
@@ -619,10 +621,9 @@ Return your response in this JSON structure:
   "scene_text": "The vivid narrative of the scene...",
   "prompt": {
     "type": "dialogue" | "action" | "dice_check",
-    "dice_type": "d6" | "d10" (only if type is dice_check),
-    "dice_count": 1 to 6 (only if type is dice_check),
-    "target_character": "Character Name" (REQUIRED for single dice_check) or null (for dialogue/action to entire party),
-    "target_characters": ["Char1", "Char2"] (for multi-character dice_check) or null,
+    "dice_type": "d6" | "d10" (only if type is dice_check, always single die roll),
+    "target_character": "Character Name" (REQUIRED for single dice_check, optional for action/dialogue) or null,
+    "target_characters": ["Char1", "Char2"] (for multi-character dice_check or action) or null,
     "prompt_text": "The question or instruction for the player(s)"
   },
   "updated_characters": [
@@ -703,7 +704,7 @@ Parse each character's roll separately and apply their individual modifiers.
    - Calculate: Roll + Stat Modifier + Skill Bonus (if applicable)
    - For d6 checks: 4+ is success, 6+ is critical success, 2 or less is critical failure
    - For d10 checks: 6+ is success, 9+ is critical success, 3 or less is critical failure
-   - Multiple dice: Sum all dice, then apply modifiers once to the total
+   - Note: Always single die roll, so modifiers are very impactful
 
 4. NARRATE THE RESULT:
    - Explicitly mention the stat modifier and skill bonus in your narrative

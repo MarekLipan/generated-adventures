@@ -47,19 +47,15 @@ class PromptType(BaseModel):
     )
     dice_type: Optional[str] = Field(
         None,
-        description="Type of dice to roll if type is 'dice_check': 'd6' or 'd10'",
-    )
-    dice_count: Optional[int] = Field(
-        None,
-        description="Number of dice to roll if type is 'dice_check'",
+        description="Type of dice to roll if type is 'dice_check': 'd6' or 'd10'. Always single die roll.",
     )
     target_character: Optional[str] = Field(
         None,
-        description="Name of specific character being prompted. REQUIRED (not None) for single-character dice_check prompts. Use None only for dialogue/action prompts where entire party acts together. For multi-character dice checks, use target_characters instead and set this to None.",
+        description="Name of specific character being prompted. REQUIRED (not None) for single-character dice_check prompts. Can be used for dialogue/action to target a specific character. For multi-character prompts, use target_characters instead and set this to None.",
     )
     target_characters: Optional[List[str]] = Field(
         None,
-        description="List of character names for multi-character dice_check prompts where multiple specific characters roll simultaneously. When using this, set target_character to None.",
+        description="List of character names for multi-character prompts (dice_check or action) where multiple specific characters act/roll simultaneously. When using this, set target_character to None.",
     )
     prompt_text: str = Field(
         ...,

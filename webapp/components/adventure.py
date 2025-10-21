@@ -60,16 +60,10 @@ async def start_adventure(main_container, game_id: str):
             character_dice_inputs = {}  # For multi-character dice checks
 
             if prompt_type == "dice_check":
-                # Dice roll input - number only
-                dice_display = ""
-                if prompt and prompt.dice_count and prompt.dice_type:
-                    dice_display = (
-                        f"{prompt.dice_count}{prompt.dice_type}"
-                        if prompt.dice_count > 1
-                        else prompt.dice_type
-                    )
-                else:
-                    dice_display = "dice"
+                # Dice roll input - single die only
+                dice_display = (
+                    prompt.dice_type if prompt and prompt.dice_type else "dice"
+                )
 
                 # Check if this is a multi-character dice check
                 has_multiple_targets = (
@@ -111,23 +105,48 @@ async def start_adventure(main_container, game_id: str):
                 ).classes("w-full")
 
             else:  # action
-                # Standard action input
-                ui.label("⚔️ Describe your action:").classes(
-                    "text-sm fantasy-text-muted mb-3 stat-label"
+                # Check if this is a multi-character action
+                has_multiple_targets = (
+                    prompt
+                    and hasattr(prompt, "target_characters")
+                    and prompt.target_characters
+                    and len(prompt.target_characters) > 1
                 )
-                action_input = ui.input(
-                    label="Action", placeholder="What do you do?"
-                ).classes("w-full")
+
+                if has_multiple_targets:
+                    # Multiple character action inputs
+                    ui.label("⚔️ Each character describes their action:").classes(
+                        "text-sm fantasy-text-muted mb-3 stat-label"
+                    )
+                    for char_name in prompt.target_characters:
+                        character_dice_inputs[char_name] = ui.input(
+                            label=f"{char_name}'s Action",
+                            placeholder=f"What does {char_name} do?",
+                        ).classes("w-full mb-2")
+                else:
+                    # Standard single action input
+                    ui.label("⚔️ Describe your action:").classes(
+                        "text-sm fantasy-text-muted mb-3 stat-label"
+                    )
+                    action_input = ui.input(
+                        label="Action", placeholder="What do you do?"
+                    ).classes("w-full")
 
             async def on_submit(_e=None):
-                # Handle multi-character dice checks
-                if prompt_type == "dice_check" and character_dice_inputs:
-                    # Format: "Korgath: 7, Sister Anya: 4"
-                    rolls = []
+                # Handle multi-character prompts (dice checks or actions)
+                if character_dice_inputs:
+                    # Format: "CharacterName1: value, CharacterName2: value"
+                    responses = []
                     for char_name, input_field in character_dice_inputs.items():
                         if input_field.value is not None:
-                            rolls.append(f"{char_name}: {int(input_field.value)}")
-                    player_action = ", ".join(rolls) if rolls else ""
+                            # For dice checks, convert to int; for actions, keep as string
+                            value = (
+                                int(input_field.value)
+                                if prompt_type == "dice_check"
+                                else input_field.value
+                            )
+                            responses.append(f"{char_name}: {value}")
+                    player_action = ", ".join(responses) if responses else ""
                 else:
                     player_input = action_input.value
 
