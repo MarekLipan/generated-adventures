@@ -8,10 +8,12 @@ these with real model calls (Gemini, OpenAI, etc.) later.
 import asyncio
 import logging
 import pathlib
+import wave
 from io import BytesIO
 from typing import List, Optional
 
 from google import genai as genai_client  # type: ignore
+from google.genai import types as genai_types  # type: ignore
 from PIL import Image
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
@@ -41,6 +43,9 @@ IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 SCENE_IMAGE_DIR = pathlib.Path("webapp/static/scenes")
 SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+VOICEOVER_DIR = pathlib.Path("webapp/static/voiceovers")
+VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _generate_character_image_sync(
@@ -265,6 +270,77 @@ def _generate_scene_image_sync(
             return None
 
     return None
+
+
+def _generate_scene_voiceover_sync(
+    client,
+    game_id: str,
+    scene_id: int,
+    scene_text: str,
+) -> pathlib.Path | None:
+    """Synchronous helper to generate a scene voiceover narration using Gemini TTS.
+
+    Args:
+        client: Google GenAI client
+        game_id: Game identifier for directory structure
+        scene_id: Scene number
+        scene_text: The narrative text of the scene to narrate
+
+    Returns:
+        Path to saved voiceover WAV file or None if generation failed
+    """
+    # Create voiceover directory for this game
+    voiceover_dir = VOICEOVER_DIR / game_id
+    voiceover_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"scene_{scene_id:03d}.wav"
+    voiceover_file_path = voiceover_dir / filename
+
+    logger.info(f"Generating voiceover for scene {scene_id} in game {game_id}")
+
+    try:
+        config = genai_types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=genai_types.SpeechConfig(
+                voice_config=genai_types.VoiceConfig(
+                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
+                        voice_name="Algieba"
+                    )
+                )
+            ),
+        )
+
+        response = client.models.generate_content(
+            model="models/gemini-2.5-flash-preview-tts",
+            contents=scene_text,
+            config=config,
+        )
+
+        # Extract PCM audio data from response and save as WAV
+        if response and hasattr(response, "candidates"):
+            for part in response.candidates[0].content.parts:  # type: ignore[index]
+                if getattr(part, "inline_data", None) and getattr(
+                    part.inline_data, "data", None
+                ):
+                    # Convert PCM data to WAV format
+                    pcm_data = part.inline_data.data
+
+                    # Save as WAV with proper headers (24kHz, 16-bit, mono)
+                    with wave.open(str(voiceover_file_path), "wb") as wav_file:
+                        wav_file.setnchannels(1)  # mono
+                        wav_file.setsampwidth(2)  # 16-bit = 2 bytes
+                        wav_file.setframerate(24000)  # 24kHz sample rate
+                        wav_file.writeframes(pcm_data)
+
+                    logger.info(f"Saved voiceover at {voiceover_file_path}")
+                    return voiceover_file_path
+
+        logger.warning(f"No audio content in response for scene {scene_id}")
+        return None
+
+    except Exception as e:
+        logger.warning(f"Voiceover generation failed for scene {scene_id}: {e}")
+        return None
 
 
 async def generate_scenarios(previously_played: list[str] | None = None) -> list[str]:
@@ -793,9 +869,10 @@ Make the scene immersive and exciting!
         characters, generated.updated_characters
     )
 
-    # Generate scene image in background thread
+    # Generate scene image and voiceover in background threads (concurrently)
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
-    image_file_path = await asyncio.to_thread(
+
+    image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         client,
         game_id,
@@ -806,14 +883,40 @@ Make the scene immersive and exciting!
         None,  # No previous scene for opening scene
     )
 
-    # Convert to web path if image was generated
+    voiceover_task = asyncio.to_thread(
+        _generate_scene_voiceover_sync,
+        client,
+        game_id,
+        scene_id,
+        generated.scene_text,
+    )
+
+    # Wait for both to complete
+    image_file_path, voiceover_file_path = await asyncio.gather(
+        image_task, voiceover_task, return_exceptions=True
+    )
+
+    # Handle exceptions
+    if isinstance(image_file_path, Exception):
+        logger.error(f"Image generation failed: {image_file_path}")
+        image_file_path = None
+    if isinstance(voiceover_file_path, Exception):
+        logger.error(f"Voiceover generation failed: {voiceover_file_path}")
+        voiceover_file_path = None
+
+    # Convert to web paths if generated
     image_web_path = None
     if image_file_path:
         image_web_path = f"/static/scenes/{game_id}/{image_file_path.name}"
 
+    voiceover_web_path = None
+    if voiceover_file_path:
+        voiceover_web_path = f"/static/voiceovers/{game_id}/{voiceover_file_path.name}"
+
     scene = _make_scene(
         scene_id, generated.scene_text, generated.prompt, image_web_path
     )
+    scene.voiceover_path = voiceover_web_path
     return scene, updated_characters
 
 
@@ -946,7 +1049,7 @@ Continue the adventure!
         characters, generated.updated_characters
     )
 
-    # Generate scene image in background thread
+    # Generate scene image and voiceover in background threads (concurrently)
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
 
     # Construct path to previous scene image for visual continuity
@@ -956,7 +1059,7 @@ Continue the adventure!
             SCENE_IMAGE_DIR / game_id / f"scene_{last_scene_id:03d}.png"
         )
 
-    image_file_path = await asyncio.to_thread(
+    image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         client,
         game_id,
@@ -967,10 +1070,36 @@ Continue the adventure!
         previous_scene_image_path,
     )
 
-    # Convert to web path if image was generated
+    voiceover_task = asyncio.to_thread(
+        _generate_scene_voiceover_sync,
+        client,
+        game_id,
+        next_id,
+        generated.scene_text,
+    )
+
+    # Wait for both to complete
+    image_file_path, voiceover_file_path = await asyncio.gather(
+        image_task, voiceover_task, return_exceptions=True
+    )
+
+    # Handle exceptions
+    if isinstance(image_file_path, Exception):
+        logger.error(f"Image generation failed: {image_file_path}")
+        image_file_path = None
+    if isinstance(voiceover_file_path, Exception):
+        logger.error(f"Voiceover generation failed: {voiceover_file_path}")
+        voiceover_file_path = None
+
+    # Convert to web paths if generated
     image_web_path = None
     if image_file_path:
         image_web_path = f"/static/scenes/{game_id}/{image_file_path.name}"
 
+    voiceover_web_path = None
+    if voiceover_file_path:
+        voiceover_web_path = f"/static/voiceovers/{game_id}/{voiceover_file_path.name}"
+
     scene = _make_scene(next_id, generated.scene_text, generated.prompt, image_web_path)
+    scene.voiceover_path = voiceover_web_path
     return scene, updated_characters

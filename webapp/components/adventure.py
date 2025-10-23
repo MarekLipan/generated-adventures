@@ -28,6 +28,19 @@ async def start_adventure(main_container, game_id: str):
 
                 ui.markdown(scene.text).classes("markdown w-full text-left mb-6")
 
+                # Voice-over audio player if available
+                if scene.voiceover_path:
+                    ui.html('<div class="ornate-divider"></div>')
+                    with ui.row().classes(
+                        "items-center gap-3 mb-4 p-3 rounded-lg bg-gray-800/50"
+                    ):
+                        ui.icon("volume_up", size="lg").classes("text-yellow-500")
+                        ui.label("Scene Narration:").classes(
+                            "text-sm fantasy-text-gold font-semibold"
+                        )
+                        ui.audio(scene.voiceover_path).classes("flex-grow")
+                    ui.html('<div class="ornate-divider"></div>')
+
             # Display scene image if available
             if scene.image_path:
                 ui.image(scene.image_path).classes(
