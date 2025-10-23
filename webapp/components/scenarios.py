@@ -4,6 +4,7 @@ import logging
 from nicegui import ui
 
 from webapp.services import game_flow  # type: ignore
+from webapp.utils import show_api_error, show_loading  # type: ignore
 
 from .characters import show_characters  # type: ignore
 from .dm_notes import show_dm_notes_before_characters  # type: ignore
@@ -13,16 +14,26 @@ logger = logging.getLogger()
 
 async def show_scenarios(main_container, game_id: str):
     # Show loading indicator while generating scenarios
-    main_container.clear()
-    with main_container:
-        with ui.card().classes("fantasy-panel"):
-            ui.label("🎲 Generating Scenarios...").classes("text-h5 mb-4")
-            ui.spinner(size="lg")
-            ui.label("The Dungeon Master is preparing epic tales...").classes(
-                "loading-message mt-4"
-            )
+    show_loading(
+        main_container,
+        "🎲 Generating Scenarios...",
+        "The Dungeon Master is preparing epic tales...",
+    )
 
-    scenarios = await game_flow.generate_scenarios()
+    try:
+        scenarios = await game_flow.generate_scenarios()
+    except Exception as e:
+        show_api_error(
+            main_container,
+            error=e,
+            title="Error Generating Scenarios",
+            message="The Dungeon Master encountered an issue while preparing adventures.",
+            retry_callback=lambda: asyncio.create_task(
+                show_scenarios(main_container, game_id)
+            ),
+        )
+        return
+
     main_container.clear()
     with main_container:
         with ui.card().classes("fantasy-panel"):
@@ -42,18 +53,28 @@ async def handle_scenario_selection(main_container, game_id: str, scenario_name:
     game_flow.select_scenario(game_id, scenario_name)
 
     # Show loading indicator while generating scenario details
-    main_container.clear()
-    with main_container:
-        with ui.card().classes("fantasy-panel"):
-            ui.label("📜 Preparing Your Quest...").classes("text-h5 mb-4")
-            ui.spinner(size="lg")
-            ui.label("The Dungeon Master is weaving your tale...").classes(
-                "loading-message mt-4"
-            )
+    show_loading(
+        main_container,
+        "📜 Preparing Your Quest...",
+        "The Dungeon Master is weaving your tale...",
+    )
 
     logger.info("Generating scenario details...")
-    await game_flow.generate_and_set_details(game_id)
-    logger.info("Scenario details generated")
+    try:
+        await game_flow.generate_and_set_details(game_id)
+        logger.info("Scenario details generated")
+    except Exception as e:
+        logger.error(f"Error generating scenario details: {e}", exc_info=True)
+        show_api_error(
+            main_container,
+            error=e,
+            title="Error Generating Quest Details",
+            message="The Dungeon Master encountered an issue while preparing your quest.",
+            retry_callback=lambda: asyncio.create_task(
+                handle_scenario_selection(main_container, game_id, scenario_name)
+            ),
+        )
+        return
 
     if game_flow.show_dm_notes_enabled():
         logger.info("DM notes enabled, showing DM notes first")

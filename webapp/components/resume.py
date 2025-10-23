@@ -3,6 +3,7 @@
 from nicegui import ui
 
 from webapp.services import game_flow  # type: ignore
+from webapp.utils import show_api_error  # type: ignore
 
 from .adventure import start_adventure  # type: ignore
 from .characters import show_characters  # type: ignore
@@ -33,8 +34,18 @@ async def resume_game(main_container, game_id: str):
 
     # If scenario selected but no details generated, generate and continue
     if not game_state.scenario_details:
-        await game_flow.generate_and_set_details(game_id)
-        game_state = game_flow.get_game_state(game_id)  # Refresh state
+        try:
+            await game_flow.generate_and_set_details(game_id)
+            game_state = game_flow.get_game_state(game_id)  # Refresh state
+        except Exception as e:
+            show_api_error(
+                main_container,
+                error=e,
+                title="Error Generating Scenario Details",
+                message="The Dungeon Master encountered an issue while preparing the scenario.",
+                retry_callback=None,  # No retry - user can refresh or go back
+            )
+            return
 
     # If we have scenes, game has started - go to adventure
     if game_state.scenes:

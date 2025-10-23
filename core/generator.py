@@ -10,10 +10,11 @@ import logging
 import pathlib
 import wave
 from io import BytesIO
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from google import genai as genai_client  # type: ignore
 from google.genai import types as genai_types  # type: ignore
+from google.genai.errors import ClientError, ServerError  # type: ignore
 from PIL import Image
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
@@ -46,6 +47,61 @@ SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 VOICEOVER_DIR = pathlib.Path("webapp/static/voiceovers")
 VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# Retry configuration for API calls
+MAX_RETRIES = 5
+RETRY_DELAY = 3  # seconds
+RETRY_BACKOFF = 2  # exponential backoff multiplier
+
+
+async def retry_on_overload(func: Callable, *args, **kwargs) -> any:
+    """Retry async function calls when the API is overloaded.
+
+    Retries on 503 (Service Unavailable) and 429 (Too Many Requests) errors
+    with exponential backoff.
+    """
+    last_exception = None
+    delay = RETRY_DELAY
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await func(*args, **kwargs)
+        except (ServerError, ClientError) as e:
+            last_exception = e
+            # Check if it's a retryable error (503, 429, or 500)
+            if hasattr(e, "status_code"):
+                status_code = e.status_code
+            elif hasattr(e, "code"):
+                status_code = e.code
+            else:
+                # Unknown error format, don't retry
+                raise
+
+            if status_code in (503, 429, 500):
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(
+                        f"API error {status_code} on attempt {attempt + 1}/{MAX_RETRIES}. "
+                        f"Retrying in {delay} seconds..."
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= RETRY_BACKOFF  # exponential backoff
+                else:
+                    logger.error(
+                        f"API error {status_code} after {MAX_RETRIES} attempts. Giving up."
+                    )
+                    raise
+            else:
+                # Non-retryable error (e.g., 400 Bad Request)
+                raise
+        except Exception as e:
+            # Unexpected error, don't retry
+            logger.error(f"Unexpected error during API call: {type(e).__name__}: {e}")
+            raise
+
+    # Should never reach here, but just in case
+    if last_exception:
+        raise last_exception
 
 
 def _generate_character_image_sync(
@@ -376,7 +432,7 @@ Provide only the scenario names."""
     logger.info(
         f"Generating scenarios (avoiding {len(previously_played or [])} previously played)..."
     )
-    result = await agent.run(prompt)
+    result = await retry_on_overload(agent.run, prompt)
 
     return result.output.scenarios
 
@@ -430,7 +486,7 @@ Provide a diverse set of classic fantasy archetypes.
 Make each character distinctive and memorable with rich details that fit the scenario.
 Skills should match the character's background, stats, and archetype.
 """
-    concept_result = await agent.run(prompt)
+    concept_result = await retry_on_overload(agent.run, prompt)
     generated_concepts = concept_result.output.characters
     logger.info(f"Character concepts generated: {[c.name for c in generated_concepts]}")
 
@@ -515,7 +571,7 @@ Return ONLY JSON matching this pydantic model fields (no markdown, no code fence
 }}
 Each field should be 2-4 paragraphs of rich, game-master-usable content for the scenario '{scenario_name}'.
 """
-    result = await agent.run(prompt)
+    result = await retry_on_overload(agent.run, prompt)
     data = result.output
     markdown = (
         f"## The Setting\n\n{data.setting}\n\n"
@@ -861,7 +917,7 @@ Generate the opening scene for this adventure. Create an engaging, atmospheric i
 Make the scene immersive and exciting!
 """
 
-    result = await agent.run(prompt)
+    result = await retry_on_overload(agent.run, prompt)
     generated = result.output
 
     # Apply character updates from the scene
@@ -1041,7 +1097,7 @@ Generate the next scene in this adventure. The scene should:
 Continue the adventure!
 """
 
-    result = await agent.run(prompt)
+    result = await retry_on_overload(agent.run, prompt)
     generated = result.output
 
     # Apply character updates from the scene

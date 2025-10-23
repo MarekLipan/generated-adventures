@@ -1,6 +1,9 @@
+import asyncio
+
 from nicegui import ui
 
 from webapp.services import game_flow  # type: ignore
+from webapp.utils import show_api_error, show_loading  # type: ignore
 
 from .character_display import render_character_cards  # type: ignore
 
@@ -172,23 +175,31 @@ async def start_adventure(main_container, game_id: str):
                         player_action = player_input
 
                 # Show loading indicator
-                main_container.clear()
-                with main_container:
-                    with ui.card().classes("fantasy-panel"):
-                        ui.label("🎲 Generating Next Scene...").classes("text-h5 mb-4")
-                        ui.spinner(size="lg")
-                        ui.label(
-                            "The Dungeon Master is crafting your story..."
-                        ).classes("loading-message mt-4")
+                show_loading(
+                    main_container,
+                    "🎲 Generating Next Scene...",
+                    "The Dungeon Master is crafting your story...",
+                )
 
-                next_scene = await game_flow.advance_scene(game_id, player_action)
-                if next_scene:
-                    render_scene(next_scene)
-                else:
-                    main_container.clear()
-                    with ui.card().classes("fantasy-panel"):
-                        ui.label("📜 The Tale Concludes").classes("text-h5")
-                        ui.label("No further scenes.").classes("loading-message mt-2")
+                try:
+                    next_scene = await game_flow.advance_scene(game_id, player_action)
+                    if next_scene:
+                        render_scene(next_scene)
+                    else:
+                        main_container.clear()
+                        with ui.card().classes("fantasy-panel"):
+                            ui.label("📜 The Tale Concludes").classes("text-h5")
+                            ui.label("No further scenes.").classes(
+                                "loading-message mt-2"
+                            )
+                except Exception as e:
+                    show_api_error(
+                        main_container,
+                        error=e,
+                        title="Error Generating Scene",
+                        message="The Dungeon Master encountered an issue while crafting the story.",
+                        retry_callback=lambda: render_scene(game_state.scenes[-1]),
+                    )
 
             ui.button("⚔️ Submit", on_click=on_submit).classes("mt-4 mb-6 w-full")
 
@@ -204,23 +215,34 @@ async def start_adventure(main_container, game_id: str):
     current = game_flow.get_current_scene(game_id)
     if not current:
         # Show loading indicator for opening scene generation
-        main_container.clear()
-        with main_container:
-            with ui.card().classes("fantasy-panel"):
-                ui.label("🎲 Starting Your Adventure...").classes("text-h5 mb-4")
-                ui.spinner(size="lg")
-                ui.label(
-                    "The Dungeon Master is preparing the opening scene..."
-                ).classes("loading-message mt-4")
+        show_loading(
+            main_container,
+            "🎲 Starting Your Adventure...",
+            "The Dungeon Master is preparing the opening scene...",
+        )
 
-        await game_flow.generate_opening_scene(game_id)
-        current = game_flow.get_current_scene(game_id)
+        try:
+            await game_flow.generate_opening_scene(game_id)
+            current = game_flow.get_current_scene(game_id)
+        except Exception as e:
+            show_api_error(
+                main_container,
+                error=e,
+                title="Error Starting Adventure",
+                message="The Dungeon Master encountered an issue while preparing the opening scene.",
+                retry_callback=lambda: asyncio.create_task(
+                    start_adventure(main_container, game_id)
+                ),
+            )
+            return
+
     if current:
         render_scene(current)
     else:
         main_container.clear()
-        with ui.card().classes("fantasy-panel"):
-            ui.label("⚠️ Unable to Start").classes("text-h5")
-            ui.label("Unable to start the adventure: no scene available.").classes(
-                "loading-message mt-2"
-            )
+        with main_container:
+            with ui.card().classes("fantasy-panel"):
+                ui.label("⚠️ Unable to Start").classes("text-h5")
+                ui.label("Unable to start the adventure: no scene available.").classes(
+                    "loading-message mt-2"
+                )
