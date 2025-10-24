@@ -191,6 +191,7 @@ def _generate_scene_image_sync(
     characters: List[Character],
     scenario_name: str,
     previous_scene_image_path: Optional[pathlib.Path] = None,
+    previous_scene_text: Optional[str] = None,
     game_status: GameStatus = "ongoing",
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
@@ -203,6 +204,7 @@ def _generate_scene_image_sync(
         characters: List of characters in the party (for reference images)
         scenario_name: Name of the scenario
         previous_scene_image_path: Optional path to the previous scene's image for visual continuity
+        previous_scene_text: Optional text from the previous scene for context
         game_status: Status of the game ('ongoing', 'completed', 'failed')
 
     Returns:
@@ -237,8 +239,23 @@ def _generate_scene_image_sync(
         "- Create a cinematic, immersive scene where characters are part of the action, not posing for portraits",
     ]
 
-    # Add note about previous scene if available
-    if previous_scene_image_path:
+    # Add context from previous scene if available
+    if previous_scene_image_path and previous_scene_text:
+        prompt_parts.append("\n**PREVIOUS SCENE CONTEXT (for continuity only):**")
+        prompt_parts.append(f"Previous scene narrative: {previous_scene_text}")
+        prompt_parts.append(
+            "- Use the previous scene image as a reference for visual continuity in style, lighting, and environment"
+        )
+        prompt_parts.append(
+            "- IMPORTANT: Only include characters, objects, and NPCs that are still present in the CURRENT scene"
+        )
+        prompt_parts.append(
+            "- If characters left, died, or NPCs departed in the previous scene, DO NOT include them in this image"
+        )
+        prompt_parts.append(
+            "- The previous scene is for style reference - the CURRENT narrative determines what should be shown"
+        )
+    elif previous_scene_image_path:
         prompt_parts.append(
             "- Use the previous scene image as a reference for visual continuity in style, lighting, and environment"
         )
@@ -1006,6 +1023,7 @@ Make the scene immersive, clear, and exciting!
         characters,
         scenario_name,
         None,  # No previous scene for opening scene
+        None,  # No previous scene text for opening scene
         generated.game_status,
     )
 
@@ -1184,10 +1202,17 @@ Continue the adventure!
 
     # Construct path to previous scene image for visual continuity
     previous_scene_image_path = None
+    previous_scene_text = None
     if last_scene_id >= 1:
         previous_scene_image_path = (
             SCENE_IMAGE_DIR / game_id / f"scene_{last_scene_id:03d}.png"
         )
+        # Get previous scene text from conversation history
+        if conversation_history:
+            for entry in conversation_history:
+                if entry.get("scene_id") == last_scene_id:
+                    previous_scene_text = entry.get("scene_text")
+                    break
 
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
@@ -1198,6 +1223,7 @@ Continue the adventure!
         characters,
         scenario_name,
         previous_scene_image_path,
+        previous_scene_text,
         generated.game_status,
     )
 
