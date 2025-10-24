@@ -1,9 +1,14 @@
 """Pydantic models for the game state."""
 
 import uuid
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+# Type aliases for strict field validation
+GameStatus = Literal["ongoing", "completed", "failed"]
+PromptTypeEnum = Literal["dialogue", "action", "dice_check"]
+DiceType = Literal["d6", "d10"]
 
 
 class Character(BaseModel):
@@ -41,11 +46,11 @@ class Character(BaseModel):
 class PromptType(BaseModel):
     """Represents a prompt type for player interaction."""
 
-    type: str = Field(
+    type: PromptTypeEnum = Field(
         ...,
         description="Type of prompt: 'dialogue', 'action', 'dice_check'",
     )
-    dice_type: Optional[str] = Field(
+    dice_type: Optional[DiceType] = Field(
         None,
         description="Type of dice to roll if type is 'dice_check': 'd6' or 'd10'. Always single die roll.",
     )
@@ -64,8 +69,14 @@ class PromptType(BaseModel):
 
     @model_validator(mode="after")
     def validate_dice_check_targeting(self) -> "PromptType":
-        """Ensure dice_check prompts always have a target specified."""
+        """Ensure dice_check prompts have proper dice_type and target specified."""
         if self.type == "dice_check":
+            # Ensure dice_type is specified for dice checks
+            if self.dice_type is None:
+                raise ValueError(
+                    "dice_check prompts must specify 'dice_type' (either 'd6' or 'd10')"
+                )
+
             # For dice checks, we must have either target_character OR target_characters
             has_single_target = self.target_character is not None
             has_multi_target = (
@@ -104,6 +115,10 @@ class Scene(BaseModel):
     )
     voiceover_path: Optional[str] = Field(
         None, description="Path to a voiceover file for the scene"
+    )
+    game_status: GameStatus = Field(
+        default="ongoing",
+        description="Status of the game: 'ongoing', 'completed' (victory), or 'failed' (game over)",
     )
 
 
@@ -193,4 +208,8 @@ class GeneratedScene(BaseModel):
     updated_characters: List[GeneratedCharacter] = Field(
         default_factory=list,
         description="Full character sheets after this scene. Re-generate all characters with updated stats, health, and inventory based on what happened in the scene. If nothing changed for a character, return them with the same values.",
+    )
+    game_status: GameStatus = Field(
+        default="ongoing",
+        description="Status of the game: 'ongoing' (continue adventure), 'completed' (main quest fulfilled, party victorious), or 'failed' (all characters dead or quest failed). Set to 'failed' if ANY character reaches 0 health. Set to 'completed' only when the main quest objective is definitively achieved.",
     )

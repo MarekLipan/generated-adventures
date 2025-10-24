@@ -23,6 +23,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from .config import settings
 from .models import (
     Character,
+    GameStatus,
     GeneratedCharacterList,
     GeneratedScenarioDetails,
     GeneratedScenarios,
@@ -190,6 +191,7 @@ def _generate_scene_image_sync(
     characters: List[Character],
     scenario_name: str,
     previous_scene_image_path: Optional[pathlib.Path] = None,
+    game_status: GameStatus = "ongoing",
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
 
@@ -201,6 +203,7 @@ def _generate_scene_image_sync(
         characters: List of characters in the party (for reference images)
         scenario_name: Name of the scenario
         previous_scene_image_path: Optional path to the previous scene's image for visual continuity
+        game_status: Status of the game ('ongoing', 'completed', 'failed')
 
     Returns:
         Path to saved scene image or None if generation failed
@@ -238,6 +241,16 @@ def _generate_scene_image_sync(
     if previous_scene_image_path:
         prompt_parts.append(
             "- Use the previous scene image as a reference for visual continuity in style, lighting, and environment"
+        )
+
+    # Add special instructions for ending scenes
+    if game_status == "completed":
+        prompt_parts.append(
+            "\n🏆 VICTORY SCENE: This is the triumphant conclusion! Show epic victory, celebration, or peaceful resolution. Use dramatic, uplifting lighting (golden hour, radiant light). Emphasize heroic achievement and success."
+        )
+    elif game_status == "failed":
+        prompt_parts.append(
+            "\n💀 DEFEAT SCENE: This is the tragic ending. Show dramatic defeat, somber atmosphere, or fallen heroes. Use darker, dramatic lighting (shadows, dusk, stormy). Convey the weight of failure or sacrifice."
         )
 
     prompt_parts.extend(
@@ -671,7 +684,11 @@ def _apply_character_updates(
 
 
 def _make_scene(
-    scene_id: int, scene_text: str, prompt, image_path: str | None = None
+    scene_id: int,
+    scene_text: str,
+    prompt,
+    image_path: str | None = None,
+    game_status: GameStatus = "ongoing",
 ) -> Scene:
     """Helper to create a Scene object from generated data.
 
@@ -680,6 +697,7 @@ def _make_scene(
         scene_text: The narrative text of the scene
         prompt: PromptType object from the generated scene
         image_path: Optional path to the scene image
+        game_status: Status of the game ('ongoing', 'completed', 'failed')
     """
     return Scene(
         id=scene_id,
@@ -687,6 +705,7 @@ def _make_scene(
         prompt=prompt,
         image_path=image_path,
         voiceover_path=None,
+        game_status=game_status,
     )
 
 
@@ -748,7 +767,22 @@ CRITICAL RULES FOR CHARACTER UPDATES:
 - If nothing happened to a character, return them unchanged
 - Keep backstory, appearance, and personality the same (these don't change during adventures)
 
-Return your response in this JSON structure:
+CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
+- ALWAYS include game_status in your response - it is a REQUIRED field
+- Set game_status to "ongoing" (default) - continue the adventure normally
+- Set game_status to "failed" if ANY character reaches 0 current_health (party death/defeat):
+  * This ends the game immediately with a game over
+  * The scene should describe their defeat or death dramatically
+  * Still provide a prompt field (required by schema), but it won't be shown to players
+- Set game_status to "completed" ONLY when the main quest objective is definitively achieved:
+  * The primary goal from scenario_details must be fulfilled
+  * This ends the game with a victory screen
+  * The scene should describe their triumph and resolution
+  * Still provide a prompt field (required by schema), but it won't be shown to players
+- Do NOT set completed prematurely - minor victories are still "ongoing"
+- Do NOT set completed just because things are going well - only when main quest is done
+
+Return your response in this JSON structure (ALL FIELDS REQUIRED):
 {
   "scene_text": "The vivid narrative of the scene...",
   "prompt": {
@@ -771,7 +805,8 @@ Return your response in this JSON structure:
       "skills": ["current", "skills", "list"],
       "inventory": ["current", "items", "list"]
     }
-  ]
+  ],
+  "game_status": "ongoing" | "completed" | "failed"
 }
 """
 
@@ -839,9 +874,15 @@ Parse each character's roll separately and apply their individual modifiers.
    - Note: Always single die roll, so modifiers are very impactful
 
 4. NARRATE THE RESULT:
+   - ALWAYS mention the dice type that was rolled (d6 or d10) to provide context
+   - Show the roll value as a fraction to make success/failure clear to players
    - Explicitly mention the stat modifier and skill bonus in your narrative
-   - Example format: "You rolled a 4. With your high Strength (+2) and relevant skill (+1), that's a total of 7 - a solid success!"
-   - Example format: "You rolled a 3. Despite your Agility modifier (+1), you barely manage..."
+   - Example formats:
+     * "You rolled 4/6. With your high Strength (+2) and Swordsmanship skill (+1), that's a total of 7 - a solid success!"
+     * "You rolled 3/10. Despite your Agility modifier (+1), bringing you to 4, you barely manage..."
+     * "A natural 6/6! With your Intelligence bonus (+2), that's a perfect 8 - critical success!"
+     * "You rolled 2/10. Even with your skill bonus (+1), you only reach 3 - a critical failure..."
+   - The fraction format (roll/max) helps players immediately understand if it was a good or bad roll
    - Make outcomes dramatic and descriptive
    - Critical successes should have extra benefits
    - Critical failures should have interesting consequences
@@ -937,6 +978,7 @@ Make the scene immersive and exciting!
         characters,
         scenario_name,
         None,  # No previous scene for opening scene
+        generated.game_status,
     )
 
     voiceover_task = asyncio.to_thread(
@@ -970,7 +1012,11 @@ Make the scene immersive and exciting!
         voiceover_web_path = f"/static/voiceovers/{game_id}/{voiceover_file_path.name}"
 
     scene = _make_scene(
-        scene_id, generated.scene_text, generated.prompt, image_web_path
+        scene_id,
+        generated.scene_text,
+        generated.prompt,
+        image_web_path,
+        generated.game_status,
     )
     scene.voiceover_path = voiceover_web_path
     return scene, updated_characters
@@ -1124,6 +1170,7 @@ Continue the adventure!
         characters,
         scenario_name,
         previous_scene_image_path,
+        generated.game_status,
     )
 
     voiceover_task = asyncio.to_thread(
@@ -1156,6 +1203,12 @@ Continue the adventure!
     if voiceover_file_path:
         voiceover_web_path = f"/static/voiceovers/{game_id}/{voiceover_file_path.name}"
 
-    scene = _make_scene(next_id, generated.scene_text, generated.prompt, image_web_path)
+    scene = _make_scene(
+        next_id,
+        generated.scene_text,
+        generated.prompt,
+        image_web_path,
+        generated.game_status,
+    )
     scene.voiceover_path = voiceover_web_path
     return scene, updated_characters
