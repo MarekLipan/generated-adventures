@@ -947,15 +947,43 @@ PARTY CHARACTER SHEETS:
 {character_sheets}
 
 Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
-1. Sets the scene and mood
-2. Introduces the immediate situation
-3. Gives players a clear hook into the adventure
-4. References the party members naturally (consider their backstories, appearance, personality, skills, and capabilities)
-5. Be aware of their current stats, health, skills, and inventory when setting up situations
+
+CRITICAL FOR OPENING SCENE:
+1. **Establish how the party came together**: Briefly narrate how these characters met and why they're working together
+   - Use their backstories to create natural connections (shared goals, chance meeting, hired together, etc.)
+   - Make it believable based on their personalities and backgrounds
+   - Keep this part concise (2-3 sentences)
+
+2. **Explain the current situation**: Describe what brings them to this specific moment
+   - Where are they? (refer to the setting from scenario details)
+   - Why are they here? (connect to the main quest)
+   - What immediate situation do they find themselves in?
+
+3. **Introduce the main quest naturally**: Players don't know the scenario details, so reveal the quest/goal through the narrative
+   - Don't assume players know anything from the DM notes
+   - Make the objective clear through dialogue, events, or circumstances
+   - Give them a reason to care and a clear direction
+
+4. **Set the scene and mood**: Create atmosphere with vivid descriptions
+   - Describe the environment, sounds, smells, lighting
+   - Build tension or intrigue appropriate to the scenario
+
+5. **Introduce party members naturally**: Reference characters by name, appearance, and personality
+   - Show their personalities through brief actions or reactions
+   - Consider their backstories when describing how they interact
+   - Be aware of their stats, health, skills, and inventory
+
+6. **End with a clear hook**: Give players an immediate decision or action to take
+
+REMEMBER: This is the first thing players experience. They need to understand:
+- Who they are (as a group)
+- Where they are
+- What their goal/quest is
+- What they should do next
 
 {_build_scene_generation_prompt_rules()}
 
-Make the scene immersive and exciting!
+Make the scene immersive, clear, and exciting!
 """
 
     result = await retry_on_overload(agent.run, prompt)
