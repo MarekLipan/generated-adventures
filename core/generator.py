@@ -22,6 +22,7 @@ from pydantic_ai.providers.google import GoogleProvider
 
 from .config import settings
 from .models import (
+    Asset,
     Character,
     GameStatus,
     GeneratedCharacterList,
@@ -191,6 +192,8 @@ def _generate_scene_image_sync(
     characters: List[Character],
     scenario_name: str,
     game_status: GameStatus = "ongoing",
+    assets: dict[str, Asset] = None,
+    visible_asset_ids: List[str] = None,
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
 
@@ -202,6 +205,8 @@ def _generate_scene_image_sync(
         characters: List of characters in the party (for reference images)
         scenario_name: Name of the scenario
         game_status: Status of the game ('ongoing', 'completed', 'failed')
+        assets: Dictionary of all assets (NPCs and objects)
+        visible_asset_ids: List of asset IDs that should appear in this scene
 
     Returns:
         Path to saved scene image or None if generation failed
@@ -245,6 +250,9 @@ def _generate_scene_image_sync(
     )
     prompt_parts.append(
         "- Character consistency: Use the provided character reference images to ensure party members look identical across scenes (same faces, clothing, equipment)"
+    )
+    prompt_parts.append(
+        "- NPC/Object consistency: Use the provided asset reference images to ensure NPCs and important objects look identical when they reappear (same appearance, features, design)"
     )
     prompt_parts.append(
         "- Fresh compositions: Each scene should have unique framing, perspective, and camera angle - avoid repetitive layouts"
@@ -297,6 +305,30 @@ def _generate_scene_image_sync(
                     logger.warning(
                         f"Could not load character image for {char.name}: {e}"
                     )
+
+    # Add asset images as reference (if they exist and are visible in this scene)
+    if assets and visible_asset_ids:
+        for asset_id in visible_asset_ids:
+            asset = assets.get(asset_id)
+            if asset and asset.image_path:
+                # Convert web path to file path
+                asset_image_file = pathlib.Path("webapp") / asset.image_path.lstrip("/")
+                if asset_image_file.exists():
+                    try:
+                        with open(asset_image_file, "rb") as f:
+                            image_data = f.read()
+                        content_parts.append(
+                            genai_types.Part.from_bytes(
+                                data=image_data, mime_type="image/png"
+                            )
+                        )
+                        logger.info(
+                            f"Added reference image for asset: {asset.name} ({asset.type})"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not load asset image for {asset.name}: {e}"
+                        )
 
     logger.info(f"Generating scene image for scene {scene_id} in game {game_id}")
 
@@ -688,6 +720,7 @@ def _make_scene(
     prompt,
     image_path: str | None = None,
     game_status: GameStatus = "ongoing",
+    visible_asset_ids: List[str] = None,
 ) -> Scene:
     """Helper to create a Scene object from generated data.
 
@@ -697,6 +730,7 @@ def _make_scene(
         prompt: PromptType object from the generated scene
         image_path: Optional path to the scene image
         game_status: Status of the game ('ongoing', 'completed', 'failed')
+        visible_asset_ids: List of asset IDs visible in this scene
     """
     return Scene(
         id=scene_id,
@@ -705,7 +739,174 @@ def _make_scene(
         image_path=image_path,
         voiceover_path=None,
         game_status=game_status,
+        visible_asset_ids=visible_asset_ids or [],
     )
+
+
+def _format_existing_assets(assets: dict[str, Asset]) -> str:
+    """Format existing assets for inclusion in prompts.
+
+    Args:
+        assets: Dictionary mapping asset IDs to Asset objects
+
+    Returns:
+        Formatted string listing existing assets
+    """
+    if not assets:
+        return "No existing assets yet (this is the first scene)."
+
+    asset_lines = []
+    for asset in assets.values():
+        asset_lines.append(f"- **{asset.name}** ({asset.type}): {asset.description}")
+
+    return (
+        "EXISTING ASSETS (NPCs and objects already introduced - REUSE THESE NAMES AND DESCRIPTIONS):\n"
+        + "\n".join(asset_lines)
+    )
+
+
+def _process_scene_assets(
+    game_id: str,
+    scene_id: int,
+    assets_present: list,
+    existing_assets: dict[str, Asset],
+    client,
+) -> tuple[dict[str, Asset], List[str]]:
+    """Process assets from generated scene, create new ones, and generate images.
+
+    Args:
+        game_id: Game identifier for storage
+        scene_id: Scene identifier
+        assets_present: List of AssetReference objects from the generated scene
+        existing_assets: Dictionary of existing assets
+        client: Google GenAI client for image generation
+
+    Returns:
+        Tuple of (updated assets dictionary, list of visible asset IDs for this scene)
+    """
+    updated_assets = existing_assets.copy()
+    visible_asset_ids = []
+
+    # Create asset directory if it doesn't exist
+    asset_dir = pathlib.Path(f"webapp/static/assets/{game_id}")
+    asset_dir.mkdir(parents=True, exist_ok=True)
+
+    for asset_ref in assets_present:
+        # Find if this asset already exists (match by name, case-insensitive)
+        existing_asset_id = None
+        for asset_id, asset in existing_assets.items():
+            if asset.name.lower() == asset_ref.name.lower():
+                existing_asset_id = asset_id
+                break
+
+        if existing_asset_id:
+            # Asset exists, use existing one
+            if asset_ref.is_visible:
+                visible_asset_ids.append(existing_asset_id)
+            logger.info(f"Reusing existing asset: {asset_ref.name}")
+        else:
+            # New asset, create it
+            new_asset = Asset(
+                name=asset_ref.name,
+                type=asset_ref.type,
+                description=asset_ref.description,
+            )
+
+            # Generate image for the new asset
+            try:
+                asset_image_path = _generate_asset_image_sync(
+                    client, game_id, new_asset.id, new_asset.name, new_asset.description
+                )
+                if asset_image_path:
+                    new_asset.image_path = (
+                        f"/static/assets/{game_id}/{asset_image_path.name}"
+                    )
+                logger.info(f"Created new asset: {new_asset.name} ({new_asset.type})")
+            except Exception as e:
+                logger.error(
+                    f"Failed to generate image for asset {new_asset.name}: {e}"
+                )
+
+            updated_assets[new_asset.id] = new_asset
+
+            if asset_ref.is_visible:
+                visible_asset_ids.append(new_asset.id)
+
+    return updated_assets, visible_asset_ids
+
+
+def _generate_asset_image_sync(
+    client, game_id: str, asset_id: str, asset_name: str, asset_description: str
+) -> pathlib.Path | None:
+    """Generate and save an image for an asset (NPC or object).
+
+    Args:
+        client: Google GenAI client
+        game_id: Game identifier
+        asset_id: Asset identifier
+        asset_name: Name of the asset
+        asset_description: Physical description
+
+    Returns:
+        Path to the saved image file, or None if generation failed
+    """
+    # Create asset directory for this game
+    asset_dir = pathlib.Path(f"webapp/static/assets/{game_id}")
+    asset_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build prompt for asset image
+    prompt = f"""Generate a high-quality fantasy art image of: {asset_name}
+
+Description: {asset_description}
+
+CRITICAL: Generate image in SQUARE orientation (1:1 aspect ratio) - width and height MUST be equal.
+
+Style requirements:
+- Painterly fantasy art style
+- Detailed, cinematic lighting, atmospheric
+- Clear, centered view of the character/object as described
+- Consistent with fantasy adventure game aesthetics
+- DO NOT include text or labels in the image
+- Focus on the subject - minimal background, subject should be prominent
+
+CRITICAL FORMAT REQUIREMENT: Image MUST be in SQUARE orientation (1:1 aspect ratio).
+"""
+
+    logger.info(f"Generating asset image for: {asset_name}")
+
+    try:
+        from google.genai import types as genai_config  # type: ignore
+
+        # Configure for square aspect ratio
+        config = genai_config.GenerateContentConfig(
+            response_modalities=["image"],
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-image-preview",
+            contents=[prompt],
+            config=config,
+        )
+    except (RuntimeError, ValueError, OSError) as e:
+        logger.warning(f"Asset image generation request failed for {asset_name}: {e}")
+        return None
+
+    if response is not None:
+        try:
+            for part in response.candidates[0].content.parts:  # type: ignore[index]
+                if getattr(part, "inline_data", None) and getattr(
+                    part.inline_data, "data", None
+                ):
+                    img = Image.open(BytesIO(part.inline_data.data))
+                    file_path = asset_dir / f"{asset_id}.png"
+                    img.save(file_path, format="PNG")
+                    logger.info(f"Asset image saved: {file_path}")
+                    return file_path
+        except (OSError, ValueError) as e:
+            logger.warning(f"Failed to decode/save asset image for {asset_name}: {e}")
+            return None
+
+    return None
 
 
 def _build_scene_generation_prompt_rules() -> str:
@@ -798,6 +999,26 @@ CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
 - Do NOT set completed prematurely - minor victories are still "ongoing"
 - Do NOT set completed just because things are going well - only when main quest is done
 
+CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
+- Include assets_present array listing ALL important NPCs and objects in the scene
+- Important assets are: Named NPCs, significant objects, key locations that should be visually consistent
+- For each asset, specify:
+  * name: The name of the NPC or object
+  * type: "npc" for characters, "object" for items/places/things
+  * description: Physical description for image generation
+  * is_visible: true if it should appear in the scene image, false if only mentioned
+- CRITICAL: If referencing an NPC or object that was already introduced in previous scenes:
+  * Use the EXACT same name as before (check EXISTING ASSETS list if provided)
+  * Use the EXACT same physical description
+  * This ensures visual consistency - same name = same appearance
+- For new NPCs/objects appearing for the first time:
+  * Create a clear, detailed physical description
+  * This description will be used to generate their consistent image
+- Examples:
+  * NPC: {"name": "Grelda the Merchant", "type": "npc", "description": "Elderly human woman with gray hair in a bun, wearing a blue merchant's robe, warm smile, kind eyes", "is_visible": true}
+  * Object: {"name": "Crystal of Souls", "type": "object", "description": "Glowing purple crystal the size of a fist, floating slightly, emitting ethereal wisps", "is_visible": true}
+  * Mentioned only: {"name": "The Dark Lord", "type": "npc", "description": "...", "is_visible": false}
+
 Return your response in this JSON structure (ALL FIELDS REQUIRED):
 {
   "scene_text": "The vivid narrative of the scene...",
@@ -820,6 +1041,14 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
       "personality": "same as before",
       "skills": ["current", "skills", "list"],
       "inventory": ["current", "items", "list"]
+    }
+  ],
+  "assets_present": [
+    {
+      "name": "NPC or Object Name",
+      "type": "npc" | "object",
+      "description": "Physical description...",
+      "is_visible": true | false
     }
   ],
   "game_status": "ongoing" | "completed" | "failed"
@@ -916,8 +1145,9 @@ async def generate_opening_scene(
     scenario_name: str,
     scenario_details: str,
     characters: List[Character],
+    existing_assets: dict[str, Asset],
     scene_id: int = 1,
-) -> tuple[Scene, List[Character]]:
+) -> tuple[Scene, List[Character], dict[str, Asset]]:
     """Generate the opening scene for the chosen scenario.
 
     Args:
@@ -925,10 +1155,11 @@ async def generate_opening_scene(
         scenario_name: Name of the chosen scenario
         scenario_details: Full markdown details about the scenario
         characters: List of Character objects in the party (with full stats, inventory, backstory)
+        existing_assets: Dictionary of existing assets (NPCs/objects) for consistency
         scene_id: Scene identifier (default 1 for opening)
 
     Returns:
-        Tuple of (Scene object with narrative text and player prompt, Updated character list)
+        Tuple of (Scene object, Updated character list, Updated assets dictionary)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
@@ -961,6 +1192,8 @@ SCENARIO DETAILS:
 
 PARTY CHARACTER SHEETS:
 {character_sheets}
+
+{_format_existing_assets(existing_assets)}
 
 Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
 
@@ -1010,9 +1243,27 @@ Make the scene immersive, clear, and exciting!
         characters, generated.updated_characters
     )
 
-    # Generate scene image and voiceover in background threads (concurrently)
+    # Process assets and generate images in background thread
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
 
+    asset_task = asyncio.to_thread(
+        _process_scene_assets,
+        game_id,
+        scene_id,
+        generated.assets_present,
+        existing_assets,
+        client,
+    )
+
+    # Wait for asset processing to complete so we have asset images for scene generation
+    updated_assets, visible_asset_ids = await asset_task
+    if isinstance(updated_assets, Exception):
+        logger.error(f"Asset processing failed: {updated_assets}")
+        updated_assets = existing_assets
+        visible_asset_ids = []
+
+    # Generate scene image and voiceover in background threads (concurrently)
+    # Now we can include asset images in scene generation
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         client,
@@ -1022,6 +1273,8 @@ Make the scene immersive, clear, and exciting!
         characters,
         scenario_name,
         generated.game_status,
+        updated_assets,
+        visible_asset_ids,
     )
 
     voiceover_task = asyncio.to_thread(
@@ -1060,9 +1313,10 @@ Make the scene immersive, clear, and exciting!
         generated.prompt,
         image_web_path,
         generated.game_status,
+        visible_asset_ids,
     )
     scene.voiceover_path = voiceover_web_path
-    return scene, updated_characters
+    return scene, updated_characters, updated_assets
 
 
 async def generate_next_scene(
@@ -1073,7 +1327,8 @@ async def generate_next_scene(
     last_scene_id: int,
     player_action: Optional[str],
     conversation_history: List[dict],
-) -> tuple[Scene, List[Character]]:
+    existing_assets: dict[str, Asset],
+) -> tuple[Scene, List[Character], dict[str, Asset]]:
     """Generate the next scene based on the story so far and player action.
 
     Args:
@@ -1084,9 +1339,10 @@ async def generate_next_scene(
         last_scene_id: ID of the previous scene
         player_action: The player's response to the last prompt
         conversation_history: List of dicts containing scene_text, prompt, and player_action for full context
+        existing_assets: Dictionary of existing assets (NPCs/objects) for consistency
 
     Returns:
-        Tuple of (Scene object with narrative text and player prompt, Updated character list)
+        Tuple of (Scene object, Updated character list, Updated assets dictionary)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
@@ -1167,6 +1423,8 @@ SCENARIO DETAILS:
 PARTY CHARACTER SHEETS:
 {character_sheets}
 
+{_format_existing_assets(existing_assets)}
+
 {history_context}{action_context}{dice_check_rules}
 
 Generate the next scene in this adventure. The scene should:
@@ -1194,9 +1452,27 @@ Continue the adventure!
         characters, generated.updated_characters
     )
 
-    # Generate scene image and voiceover in background threads (concurrently)
+    # Process assets and generate images in background thread
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
 
+    asset_task = asyncio.to_thread(
+        _process_scene_assets,
+        game_id,
+        next_id,
+        generated.assets_present,
+        existing_assets,
+        client,
+    )
+
+    # Wait for asset processing to complete so we have asset images for scene generation
+    updated_assets, visible_asset_ids = await asset_task
+    if isinstance(updated_assets, Exception):
+        logger.error(f"Asset processing failed: {updated_assets}")
+        updated_assets = existing_assets
+        visible_asset_ids = []
+
+    # Generate scene image and voiceover in background threads (concurrently)
+    # Now we can include asset images in scene generation
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         client,
@@ -1206,6 +1482,8 @@ Continue the adventure!
         characters,
         scenario_name,
         generated.game_status,
+        updated_assets,
+        visible_asset_ids,
     )
 
     voiceover_task = asyncio.to_thread(
@@ -1244,6 +1522,7 @@ Continue the adventure!
         generated.prompt,
         image_web_path,
         generated.game_status,
+        visible_asset_ids,
     )
     scene.voiceover_path = voiceover_web_path
-    return scene, updated_characters
+    return scene, updated_characters, updated_assets

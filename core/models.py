@@ -11,6 +11,27 @@ PromptTypeEnum = Literal["dialogue", "action", "dice_check"]
 DiceType = Literal["d6", "d10"]
 
 
+class Asset(BaseModel):
+    """Represents an important NPC or object that should have consistent visual representation."""
+
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier for the asset",
+    )
+    name: str = Field(..., description="Name of the NPC or object")
+    type: Literal["npc", "object"] = Field(
+        ...,
+        description="Type of asset: 'npc' for characters, 'object' for items/places",
+    )
+    description: str = Field(
+        ...,
+        description="Physical description of the NPC or object for visual consistency",
+    )
+    image_path: Optional[str] = Field(
+        None, description="Path to the generated asset image"
+    )
+
+
 class Character(BaseModel):
     """Represents a single character in the game."""
 
@@ -116,6 +137,10 @@ class Scene(BaseModel):
     voiceover_path: Optional[str] = Field(
         None, description="Path to a voiceover file for the scene"
     )
+    visible_asset_ids: List[str] = Field(
+        default_factory=list,
+        description="List of asset IDs that are visible in this scene's image",
+    )
     game_status: GameStatus = Field(
         default="ongoing",
         description="Status of the game: 'ongoing', 'completed' (victory), or 'failed' (game over)",
@@ -132,6 +157,10 @@ class Game(BaseModel):
     scenario_details: Optional[str] = None
     scenes: List[Scene] = []
     player_actions: List[str] = []
+    assets: dict[str, Asset] = Field(
+        default_factory=dict,
+        description="Dictionary mapping asset IDs to Asset objects for visual consistency tracking",
+    )
 
 
 class GeneratedScenarios(BaseModel):
@@ -194,6 +223,27 @@ class GeneratedCharacterList(BaseModel):
     characters: List[GeneratedCharacter]
 
 
+class AssetReference(BaseModel):
+    """Reference to an asset (NPC or object) mentioned in the scene."""
+
+    name: str = Field(
+        ...,
+        description="Name of the NPC or important object. MUST match existing asset name if already introduced, or provide new name for first appearance.",
+    )
+    type: Literal["npc", "object"] = Field(
+        ...,
+        description="Type: 'npc' for characters, 'object' for important items/places",
+    )
+    description: str = Field(
+        ...,
+        description="Physical description for visual generation. MUST be consistent with existing asset if reusing.",
+    )
+    is_visible: bool = Field(
+        ...,
+        description="True if this asset should appear in the scene image, False if only mentioned",
+    )
+
+
 class GeneratedScene(BaseModel):
     """Represents a generated scene with narrative and player prompt."""
 
@@ -208,6 +258,10 @@ class GeneratedScene(BaseModel):
     updated_characters: List[GeneratedCharacter] = Field(
         default_factory=list,
         description="Full character sheets after this scene. Re-generate all characters with updated stats, health, and inventory based on what happened in the scene. If nothing changed for a character, return them with the same values.",
+    )
+    assets_present: List[AssetReference] = Field(
+        default_factory=list,
+        description="List of important NPCs and objects present in this scene. Include any significant characters or items that should have consistent visual representation. MUST reuse existing asset names when referring to already-introduced NPCs/objects.",
     )
     game_status: GameStatus = Field(
         default="ongoing",

@@ -74,12 +74,21 @@ async def generate_opening_scene(game_id: str):
     if not game or not game.scenario_name or not game.characters:
         return
 
-    # Generate the very first scene for the players (and get updated character states)
-    opening_scene, updated_characters = await generator.generate_opening_scene(
-        game_id, game.scenario_name, game.scenario_details or "", game.characters
+    # Generate the very first scene for the players (and get updated character states and assets)
+    (
+        opening_scene,
+        updated_characters,
+        updated_assets,
+    ) = await generator.generate_opening_scene(
+        game_id,
+        game.scenario_name,
+        game.scenario_details or "",
+        game.characters,
+        game.assets,
     )
     game.scenes.append(opening_scene)
     game.characters = updated_characters  # Update character states
+    game.assets = updated_assets  # Update assets
 
     persistence.save_game(game)
 
@@ -128,7 +137,11 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
             }
         )
 
-    next_scene, updated_characters = await generator.generate_next_scene(
+    (
+        next_scene,
+        updated_characters,
+        updated_assets,
+    ) = await generator.generate_next_scene(
         game_id=game_id,
         scenario_name=game_state.scenario_name or "",
         scenario_details=game_state.scenario_details or "",
@@ -136,8 +149,10 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         last_scene_id=last_id,
         player_action=player_action,
         conversation_history=conversation_history,
+        existing_assets=game_state.assets,
     )
     game_state.scenes.append(next_scene)
     game_state.characters = updated_characters  # Update character states
+    game_state.assets = updated_assets  # Update assets
     persistence.save_game(game_state)
     return next_scene
