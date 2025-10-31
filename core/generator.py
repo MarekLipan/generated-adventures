@@ -398,6 +398,25 @@ def _generate_scene_voiceover_sync(
 
     logger.info(f"Generating voiceover for scene {scene_id} in game {game_id}")
 
+    # Build enhanced prompt with narration guidance
+    narration_prompt = f"""You are an expert fantasy audiobook narrator and Dungeon Master bringing an adventure to life. 
+Read the following scene with appropriate emotion, pacing, and dramatic flair.
+
+NARRATION GUIDELINES:
+- Use a storytelling tone that draws listeners into the fantasy world
+- Vary your pacing: slow down for dramatic moments, speed up for action
+- Emphasize emotional content: excitement during discoveries, tension during danger, solemnity for serious moments
+- Add dramatic pauses where appropriate for impact (use natural speech rhythm)
+- Convey the atmosphere: mysterious for intrigue, ominous for danger, warm for friendly encounters
+- When describing dialogue or character actions, subtly shift tone to match the character's personality
+- Build tension gradually in suspenseful moments
+- Express wonder and awe for magical or epic descriptions
+- Maintain energy and engagement throughout - avoid monotone delivery
+
+SCENE TO NARRATE:
+
+{scene_text}"""
+
     try:
         config = genai_types.GenerateContentConfig(
             response_modalities=["AUDIO"],
@@ -412,7 +431,7 @@ def _generate_scene_voiceover_sync(
 
         response = client.models.generate_content(
             model="models/gemini-2.5-flash-preview-tts",
-            contents=scene_text,
+            contents=narration_prompt,
             config=config,
         )
 
