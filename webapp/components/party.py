@@ -26,7 +26,7 @@ def show_character_overview(main_container, game_id: str):
             ui.label("⚔️ Your Party is Ready!").classes("text-h4 mb-6")
 
             # Render character cards
-            render_character_cards(game_state.characters)
+            render_character_cards(game_state.characters, game_id)
 
             ui.button(
                 "🎲 Begin the Adventure!",

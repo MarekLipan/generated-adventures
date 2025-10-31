@@ -73,7 +73,7 @@ def render_game_completed(main_container, scene, game_state):
             ui.label("👥 Victorious Heroes").classes(
                 "text-h6 mb-4 fantasy-text-gold text-center"
             )
-            render_character_cards(game_state.characters)
+            render_character_cards(game_state.characters, game_state.id)
 
 
 def render_game_failed(main_container, scene, game_state):
@@ -141,7 +141,7 @@ def render_game_failed(main_container, scene, game_state):
             ui.label("💀 Fallen Heroes").classes(
                 "text-h6 mb-4 text-red-400 text-center"
             )
-            render_character_cards(game_state.characters)
+            render_character_cards(game_state.characters, game_state.id)
 
 
 async def start_adventure(main_container, game_id: str):
@@ -356,7 +356,7 @@ async def start_adventure(main_container, game_id: str):
                 ui.label("👥 Party Status").classes("text-h6 mb-4 fantasy-text-gold")
 
                 # Render character cards with expandable sections
-                render_character_cards(game_state.characters)
+                render_character_cards(game_state.characters, game_id)
 
     current = game_flow.get_current_scene(game_id)
     if not current:

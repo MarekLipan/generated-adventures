@@ -2,8 +2,10 @@
 
 from nicegui import ui
 
+from webapp.utils.pdf_generator import generate_character_sheet_pdf
 
-def render_character_cards(characters):
+
+def render_character_cards(characters, game_id: str = None):
     """Render character cards with images and expandable sections.
 
     Args:
@@ -78,3 +80,21 @@ def render_character_cards(characters):
                         )
                         for item in character.inventory:
                             ui.label(f"🎒 {item}").classes("text-xs ml-2")
+
+                    # PDF Export Button
+                    def create_pdf_download(char):
+                        """Create a download handler for this character's PDF."""
+
+                        def download_pdf():
+                            pdf_bytes = generate_character_sheet_pdf(char, game_id)
+                            # Safe filename
+                            filename = (
+                                f"{char.name.replace(' ', '_')}_character_sheet.pdf"
+                            )
+                            ui.download(pdf_bytes, filename)
+
+                        return download_pdf
+
+                    ui.button(
+                        "📄 Export PDF", on_click=create_pdf_download(character)
+                    ).classes("mt-2").props("flat color=primary size=sm")
