@@ -190,8 +190,6 @@ def _generate_scene_image_sync(
     scene_text: str,
     characters: List[Character],
     scenario_name: str,
-    previous_scene_image_path: Optional[pathlib.Path] = None,
-    previous_scene_text: Optional[str] = None,
     game_status: GameStatus = "ongoing",
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
@@ -203,8 +201,6 @@ def _generate_scene_image_sync(
         scene_text: The narrative text of the scene
         characters: List of characters in the party (for reference images)
         scenario_name: Name of the scenario
-        previous_scene_image_path: Optional path to the previous scene's image for visual continuity
-        previous_scene_text: Optional text from the previous scene for context
         game_status: Status of the game ('ongoing', 'completed', 'failed')
 
     Returns:
@@ -239,26 +235,26 @@ def _generate_scene_image_sync(
         "- Create a cinematic, immersive scene where characters are part of the action, not posing for portraits",
     ]
 
-    # Add context from previous scene if available
-    if previous_scene_image_path and previous_scene_text:
-        prompt_parts.append("\n**PREVIOUS SCENE CONTEXT (for continuity only):**")
-        prompt_parts.append(f"Previous scene narrative: {previous_scene_text}")
-        prompt_parts.append(
-            "- Use the previous scene image as a reference for visual continuity in style, lighting, and environment"
-        )
-        prompt_parts.append(
-            "- IMPORTANT: Only include characters, objects, and NPCs that are still present in the CURRENT scene"
-        )
-        prompt_parts.append(
-            "- If characters left, died, or NPCs departed in the previous scene, DO NOT include them in this image"
-        )
-        prompt_parts.append(
-            "- The previous scene is for style reference - the CURRENT narrative determines what should be shown"
-        )
-    elif previous_scene_image_path:
-        prompt_parts.append(
-            "- Use the previous scene image as a reference for visual continuity in style, lighting, and environment"
-        )
+    # Add environmental and style consistency instructions
+    prompt_parts.append("\n**SCENE COMPOSITION GUIDELINES:**")
+    prompt_parts.append(
+        f"- Setting: {scenario_name} - ensure the environment matches the fantasy scenario theme"
+    )
+    prompt_parts.append(
+        "- Art style: Maintain consistent painterly fantasy art style - cinematic, atmospheric, dramatic lighting"
+    )
+    prompt_parts.append(
+        "- Character consistency: Use the provided character reference images to ensure party members look identical across scenes (same faces, clothing, equipment)"
+    )
+    prompt_parts.append(
+        "- Fresh compositions: Each scene should have unique framing, perspective, and camera angle - avoid repetitive layouts"
+    )
+    prompt_parts.append(
+        "- Environment accuracy: Match the narrative - indoor/outdoor, time of day, weather, lighting conditions"
+    )
+    prompt_parts.append(
+        "- Only include characters and objects explicitly mentioned in the current scene narrative"
+    )
 
     # Add special instructions for ending scenes
     if game_status == "completed":
@@ -281,20 +277,6 @@ def _generate_scene_image_sync(
 
     # Prepare content with text prompt and reference images
     content_parts = [prompt_text]
-
-    # Add previous scene image for visual continuity (if available)
-    if previous_scene_image_path and previous_scene_image_path.exists():
-        try:
-            with open(previous_scene_image_path, "rb") as f:
-                prev_image_data = f.read()
-            content_parts.append(
-                genai_types.Part.from_bytes(data=prev_image_data, mime_type="image/png")
-            )
-            logger.info(
-                f"Added previous scene image for continuity: {previous_scene_image_path.name}"
-            )
-        except Exception as e:
-            logger.warning(f"Could not load previous scene image: {e}")
 
     # Add character images as reference (if they exist)
     for char in characters:
@@ -784,6 +766,23 @@ CRITICAL RULES FOR CHARACTER UPDATES:
 - If nothing happened to a character, return them unchanged
 - Keep backstory, appearance, and personality the same (these don't change during adventures)
 
+CRITICAL: NARRATE ALL CHARACTER SHEET CHANGES IN SCENE TEXT:
+- If a character takes damage, EXPLICITLY state how much health they lose in the narrative
+  * Example: "The goblin's blade slashes across your arm, dealing 15 damage. You feel your strength waning."
+  * Example: "The fall bruises you badly - you lose 8 health."
+- If a character is healed, EXPLICITLY state the healing amount
+  * Example: "The healing potion surges through you, restoring 20 health."
+  * Example: "The cleric's spell mends your wounds, recovering 12 health."
+- If a character gains an item, EXPLICITLY mention it in the narrative
+  * Example: "You pick up the enchanted dagger and add it to your pack."
+  * Example: "The grateful merchant hands you a Potion of Invisibility."
+- If a character loses/uses an item, EXPLICITLY describe it
+  * Example: "You consume the Health Potion, feeling its effects immediately."
+  * Example: "Your rope snaps under the weight and falls into the chasm below."
+- If a character learns a new skill, describe how they acquired it
+  * Example: "Through intense practice, you've mastered the art of Stealth."
+- Players should NEVER be surprised by character sheet changes - everything must be clear in the story
+
 CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
 - ALWAYS include game_status in your response - it is a REQUIRED field
 - Set game_status to "ongoing" (default) - continue the adventure normally
@@ -1022,8 +1021,6 @@ Make the scene immersive, clear, and exciting!
         generated.scene_text,
         characters,
         scenario_name,
-        None,  # No previous scene for opening scene
-        None,  # No previous scene text for opening scene
         generated.game_status,
     )
 
@@ -1200,20 +1197,6 @@ Continue the adventure!
     # Generate scene image and voiceover in background threads (concurrently)
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
 
-    # Construct path to previous scene image for visual continuity
-    previous_scene_image_path = None
-    previous_scene_text = None
-    if last_scene_id >= 1:
-        previous_scene_image_path = (
-            SCENE_IMAGE_DIR / game_id / f"scene_{last_scene_id:03d}.png"
-        )
-        # Get previous scene text from conversation history
-        if conversation_history:
-            for entry in conversation_history:
-                if entry.get("scene_id") == last_scene_id:
-                    previous_scene_text = entry.get("scene_text")
-                    break
-
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         client,
@@ -1222,8 +1205,6 @@ Continue the adventure!
         generated.scene_text,
         characters,
         scenario_name,
-        previous_scene_image_path,
-        previous_scene_text,
         generated.game_status,
     )
 
