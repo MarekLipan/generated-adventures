@@ -1435,7 +1435,16 @@ async def generate_next_scene(
                     if prompt_obj.type == "dialogue"
                     else "⚔️"
                 )
-                scene_part += f"\n\n{prompt_type_icon} **DM prompts {target}:** {prompt_obj.prompt_text}"
+                # Include dice type for dice checks so the AI knows what die was rolled
+                prompt_detail = prompt_obj.prompt_text
+                if prompt_obj.type == "dice_check" and prompt_obj.dice_type:
+                    prompt_detail = (
+                        f"{prompt_obj.prompt_text} (roll {prompt_obj.dice_type})"
+                    )
+
+                scene_part += (
+                    f"\n\n{prompt_type_icon} **DM prompts {target}:** {prompt_detail}"
+                )
 
             # Add the player's response
             if entry.get("player_action"):
