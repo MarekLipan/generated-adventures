@@ -251,6 +251,10 @@ class GeneratedScene(BaseModel):
         ...,
         description="The narrative text of the scene, describing what happens, what the players see, hear, and experience. Should be vivid and engaging.",
     )
+    visual_description: str = Field(
+        ...,
+        description="A detailed visual description of the scene for image generation purposes ONLY (not shown to players). Describe the composition, camera angle, character positions and poses, lighting, atmosphere, environment details, and mood. Focus on visual elements that would make a compelling scene illustration. 3-5 sentences.",
+    )
     prompt: PromptType = Field(
         ...,
         description="The prompt for player interaction following the scene",

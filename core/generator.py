@@ -189,6 +189,7 @@ def _generate_scene_image_sync(
     game_id: str,
     scene_id: int,
     scene_text: str,
+    visual_description: str,
     characters: List[Character],
     scenario_name: str,
     game_status: GameStatus = "ongoing",
@@ -202,6 +203,7 @@ def _generate_scene_image_sync(
         game_id: Game identifier for directory structure
         scene_id: Scene number
         scene_text: The narrative text of the scene
+        visual_description: Detailed visual description for image composition
         characters: List of characters in the party (for reference images)
         scenario_name: Name of the scenario
         game_status: Status of the game ('ongoing', 'completed', 'failed')
@@ -217,27 +219,23 @@ def _generate_scene_image_sync(
     scene_dir = SCENE_IMAGE_DIR / game_id
     scene_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build prompt with scene context
+    # Build prompt with scene context and visual description
     prompt_parts = [
         "CRITICAL: Generate image in LANDSCAPE/HORIZONTAL orientation - width MUST be greater than height (16:9 aspect ratio).",
         "Generate a high quality fantasy scene illustration.",
-        "Based on this narrative:",
-        f"\n{scene_text}\n",
-        f"Scenario: {scenario_name}",
-        "\nIMPORTANT CHARACTER INSTRUCTIONS:",
-        "- Characters should appear NATURALLY in the scene with varied angles and perspectives",
-        "- DO NOT default to frontal/portrait poses - use three-quarter views, side angles, back views, or dynamic angles as appropriate",
-        "- Characters should have DYNAMIC poses and body language that match the action/emotion of the scene",
-        "- Show appropriate facial expressions when faces are visible (fear, determination, excitement, etc.)",
-        "- Position characters naturally engaged in the scene's action, not standing static or posed for camera",
-        "- Vary character positioning: some closer, some farther, some partially visible, creating depth",
-        "- If combat/action: show fighting stances, movement, tension, characters in mid-action",
-        "- If dialogue/social: show characters facing each other, gesturing, natural conversation poses",
-        "- If exploration: show characters examining objects, pointing, reacting to environment, looking around",
-        "- Match each character's personality traits, mannerisms, and nature to their pose, expression, and body language",
-        "- Characters can be shown from any angle that serves the scene: side view, back view, three-quarter, profile, etc.",
-        "- Use the character reference images ONLY for appearance details (face, clothing, build) - NOT for pose or angle",
-        "- Create a cinematic, immersive scene where characters are part of the action, not posing for portraits",
+        f"\nScenario: {scenario_name}",
+        "\n**VISUAL COMPOSITION (FOLLOW THIS CAREFULLY):**",
+        f"{visual_description}",
+        "\n**SCENE NARRATIVE CONTEXT:**",
+        f"{scene_text}",
+        "\n**IMPORTANT CHARACTER INSTRUCTIONS:**",
+        "- Use the provided character reference images for appearance consistency (faces, clothing, equipment)",
+        "- Use the provided asset reference images for NPC/object consistency (same appearance when reappearing)",
+        "- Characters should appear NATURALLY with poses and angles matching the visual composition described above",
+        "- DO NOT default to frontal/portrait poses - follow the visual description's guidance on angles and positioning",
+        "- Show appropriate facial expressions matching the scene's emotion and action",
+        "- Create depth with varied character positioning (closer, farther, partially visible)",
+        "- Match body language and poses to character personalities and the scene's mood",
     ]
 
     # Add environmental and style consistency instructions
@@ -497,6 +495,9 @@ Provide only the scenario names."""
     )
     result = await retry_on_overload(agent.run, prompt)
 
+    logger.info("=== Scenarios Generated ===")
+    logger.info(f"Scenarios: {result.output.model_dump_json(indent=2)}")
+
     return result.output.scenarios
 
 
@@ -551,7 +552,8 @@ Skills should match the character's background, stats, and archetype.
 """
     concept_result = await retry_on_overload(agent.run, prompt)
     generated_concepts = concept_result.output.characters
-    logger.info(f"Character concepts generated: {[c.name for c in generated_concepts]}")
+    logger.info(f"=== {num_characters} Characters Generated ===")
+    logger.info(f"Characters: {concept_result.output.model_dump_json(indent=2)}")
 
     # Step 2: Synchronous image generation using working google.genai client
     # Create game-specific directory for character images
@@ -636,6 +638,11 @@ Each field should be 2-4 paragraphs of rich, game-master-usable content for the 
 """
     result = await retry_on_overload(agent.run, prompt)
     data = result.output
+
+    # Log scenario details
+    logger.info(f"=== Scenario Details Generated: {scenario_name} ===")
+    logger.info(f"Scenario details: {data.model_dump_json(indent=2)}")
+
     markdown = (
         f"## The Setting\n\n{data.setting}\n\n"
         f"## The Plot\n\n{data.plot}\n\n"
@@ -1038,9 +1045,23 @@ CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
   * Object: {"name": "Crystal of Souls", "type": "object", "description": "Glowing purple crystal the size of a fist, floating slightly, emitting ethereal wisps", "is_visible": true}
   * Mentioned only: {"name": "The Dark Lord", "type": "npc", "description": "...", "is_visible": false}
 
+CRITICAL: VISUAL DESCRIPTION FOR IMAGE GENERATION:
+- Include a visual_description field separate from scene_text
+- This description is ONLY for the image generator - players will never see it
+- Describe the scene as if directing a fantasy artist:
+  * Camera angle and framing (wide shot, close-up, three-quarter view, etc.)
+  * Character positions and poses (who is where, what they're doing, body language)
+  * Lighting and atmosphere (golden hour, torchlight, shadows, mystical glow, etc.)
+  * Environment details (architecture, nature, weather, time of day)
+  * Mood and emotion (tense, triumphant, mysterious, chaotic, peaceful)
+  * Key visual focal points (what draws the eye first)
+- Keep it 3-5 sentences, focused on composition and visual storytelling
+- Example: "Wide shot of the party standing at the entrance of a crumbling stone temple, partially obscured by thick jungle vines. Golden sunset light filters through the canopy, casting dramatic shadows across weathered statues. The barbarian stands ready with weapon drawn in the foreground, while the mage examines ancient runes on the door frame. Atmosphere is tense and mysterious, with mist creeping along the ground."
+
 Return your response in this JSON structure (ALL FIELDS REQUIRED):
 {
   "scene_text": "The vivid narrative of the scene...",
+  "visual_description": "Detailed visual description for image generation (3-5 sentences describing composition, lighting, poses, atmosphere)...",
   "prompt": {
     "type": "dialogue" | "action" | "dice_check",
     "dice_type": "d6" | "d10" (only if type is dice_check, always single die roll),
@@ -1257,6 +1278,12 @@ Make the scene immersive, clear, and exciting!
     result = await retry_on_overload(agent.run, prompt)
     generated = result.output
 
+    # Log generated scene details
+    logger.info(f"=== Opening Scene Generated (Scene {scene_id}) ===")
+    logger.info(
+        f"Generated scene model: {generated.model_dump_json(indent=2, exclude={'scene_text'})}"
+    )
+
     # Apply character updates from the scene
     updated_characters = _apply_character_updates(
         characters, generated.updated_characters
@@ -1289,6 +1316,7 @@ Make the scene immersive, clear, and exciting!
         game_id,
         scene_id,
         generated.scene_text,
+        generated.visual_description,
         characters,
         scenario_name,
         generated.game_status,
@@ -1466,6 +1494,12 @@ Continue the adventure!
     result = await retry_on_overload(agent.run, prompt)
     generated = result.output
 
+    # Log generated scene details
+    logger.info(f"=== Next Scene Generated (Scene {next_id}) ===")
+    logger.info(
+        f"Generated scene model: {generated.model_dump_json(indent=2, exclude={'scene_text'})}"
+    )
+
     # Apply character updates from the scene
     updated_characters = _apply_character_updates(
         characters, generated.updated_characters
@@ -1498,6 +1532,7 @@ Continue the adventure!
         game_id,
         next_id,
         generated.scene_text,
+        generated.visual_description,
         characters,
         scenario_name,
         generated.game_status,
