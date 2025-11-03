@@ -223,6 +223,78 @@ class GeneratedCharacterList(BaseModel):
     characters: List[GeneratedCharacter]
 
 
+class CharacterHealthChange(BaseModel):
+    """Represents a health change for a character in a scene."""
+
+    character_name: str = Field(
+        ..., description="Name of the character whose health changed"
+    )
+    health_change: int = Field(
+        ...,
+        description="Amount of health change. Negative for damage (e.g., -15), positive for healing (e.g., +20). Zero if no change.",
+    )
+    reason: str = Field(
+        ...,
+        description="Brief explanation of why health changed (e.g., 'goblin attack', 'healing potion', 'fall damage')",
+    )
+
+
+class CharacterInventoryChange(BaseModel):
+    """Represents inventory changes for a character in a scene."""
+
+    character_name: str = Field(
+        ..., description="Name of the character whose inventory changed"
+    )
+    items_added: List[str] = Field(
+        default_factory=list,
+        description="Items gained in this scene (e.g., ['Magic Sword', 'Health Potion'])",
+    )
+    items_removed: List[str] = Field(
+        default_factory=list,
+        description="Items lost or consumed in this scene (e.g., ['Rope', 'Torch'])",
+    )
+
+
+class CharacterSkillChange(BaseModel):
+    """Represents skill changes for a character in a scene."""
+
+    character_name: str = Field(
+        ..., description="Name of the character whose skills changed"
+    )
+    skills_learned: List[str] = Field(
+        default_factory=list,
+        description="New skills learned in this scene (rare, e.g., ['Advanced Lockpicking'])",
+    )
+    skills_lost: List[str] = Field(
+        default_factory=list,
+        description="Skills lost in this scene (very rare, e.g., due to curse or amnesia)",
+    )
+
+
+class CharacterStatChange(BaseModel):
+    """Represents stat changes for a character in a scene."""
+
+    character_name: str = Field(
+        ..., description="Name of the character whose stats changed"
+    )
+    strength_change: int = Field(
+        default=0,
+        description="Change in strength (-20 to +20). Usually 0. Use only for permanent effects like curses, blessings, or major transformations.",
+    )
+    intelligence_change: int = Field(
+        default=0,
+        description="Change in intelligence (-20 to +20). Usually 0. Use only for permanent effects.",
+    )
+    agility_change: int = Field(
+        default=0,
+        description="Change in agility (-20 to +20). Usually 0. Use only for permanent effects.",
+    )
+    reason: str = Field(
+        default="",
+        description="Explanation for stat changes (required if any stat changed)",
+    )
+
+
 class AssetReference(BaseModel):
     """Reference to an asset (NPC or object) mentioned in the scene."""
 
@@ -259,9 +331,21 @@ class GeneratedScene(BaseModel):
         ...,
         description="The prompt for player interaction following the scene",
     )
-    updated_characters: List[GeneratedCharacter] = Field(
+    health_changes: List[CharacterHealthChange] = Field(
         default_factory=list,
-        description="Full character sheets after this scene. Re-generate all characters with updated stats, health, and inventory based on what happened in the scene. If nothing changed for a character, return them with the same values.",
+        description="List of health changes that occurred in THIS scene only. Include an entry for each character whose health changed (damage or healing). Empty list if no health changes.",
+    )
+    inventory_changes: List[CharacterInventoryChange] = Field(
+        default_factory=list,
+        description="List of inventory changes that occurred in THIS scene only. Include an entry for each character who gained or lost items. Empty list if no inventory changes.",
+    )
+    skill_changes: List[CharacterSkillChange] = Field(
+        default_factory=list,
+        description="List of skill changes that occurred in THIS scene only (rare). Include an entry for each character who learned or lost skills. Empty list if no skill changes.",
+    )
+    stat_changes: List[CharacterStatChange] = Field(
+        default_factory=list,
+        description="List of stat changes that occurred in THIS scene only (very rare). Include an entry for each character whose permanent stats changed due to curses, blessings, transformations, etc. Empty list if no stat changes.",
     )
     assets_present: List[AssetReference] = Field(
         default_factory=list,

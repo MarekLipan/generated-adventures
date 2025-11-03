@@ -259,7 +259,13 @@ def _generate_scene_image_sync(
         "- Environment accuracy: Match the narrative - indoor/outdoor, time of day, weather, lighting conditions"
     )
     prompt_parts.append(
-        "- Only include characters and objects explicitly mentioned in the current scene narrative"
+        "- CRITICAL: Only include characters and objects explicitly mentioned in the visual description"
+    )
+    prompt_parts.append(
+        "- CRITICAL: If the visual description specifies a COUNT (e.g., 'two enemies', 'three wolves'), show EXACTLY that number - DO NOT add extras"
+    )
+    prompt_parts.append(
+        "- CRITICAL: Do NOT add unnamed background characters, extra enemies, or random NPCs not specified in the visual description"
     )
 
     # Add special instructions for ending scenes
@@ -653,13 +659,13 @@ Each field should be 2-4 paragraphs of rich, game-master-usable content for the 
 
 
 def _apply_character_updates(
-    characters: List[Character], updated_generated_chars: List
+    characters: List[Character], generated_scene
 ) -> List[Character]:
-    """Apply character state updates from regenerated character data.
+    """Apply character state updates from explicit changes in the generated scene.
 
     Args:
         characters: List of current character objects (with image_path, etc.)
-        updated_generated_chars: List of GeneratedCharacter objects from the LLM
+        generated_scene: GeneratedScene object with health_changes, inventory_changes, etc.
 
     Returns:
         Updated list of characters with modifications applied
@@ -667,75 +673,117 @@ def _apply_character_updates(
     # Create a dictionary for quick character lookup by name
     char_dict = {char.name: char for char in characters}
 
-    for updated_char in updated_generated_chars:
-        if updated_char.name not in char_dict:
+    # Apply health changes
+    for health_change in generated_scene.health_changes:
+        if health_change.character_name not in char_dict:
             logger.warning(
-                f"Character update for unknown character: {updated_char.name}. Skipping."
+                f"Health change for unknown character: {health_change.character_name}. Skipping."
             )
             continue
 
-        char = char_dict[updated_char.name]
+        char = char_dict[health_change.character_name]
+        old_health = char.current_health
+        char.current_health = max(
+            0,
+            min(char.current_health + health_change.health_change, char.maximum_health),
+        )
+
+        change_desc = f"Health: {old_health} -> {char.current_health}"
+        if health_change.health_change < 0:
+            change_desc += (
+                f" ({health_change.health_change} damage: {health_change.reason})"
+            )
+        elif health_change.health_change > 0:
+            change_desc += (
+                f" (+{health_change.health_change} healing: {health_change.reason})"
+            )
+
+        logger.info(f"Updated {char.name}: {change_desc}")
+
+    # Apply inventory changes
+    for inv_change in generated_scene.inventory_changes:
+        if inv_change.character_name not in char_dict:
+            logger.warning(
+                f"Inventory change for unknown character: {inv_change.character_name}. Skipping."
+            )
+            continue
+
+        char = char_dict[inv_change.character_name]
         changes = []
 
-        # Track changes for logging
-        if char.strength != updated_char.strength:
-            changes.append(f"STR: {char.strength} -> {updated_char.strength}")
-            char.strength = updated_char.strength
+        # Add new items
+        for item in inv_change.items_added:
+            if item not in char.inventory:
+                char.inventory.append(item)
+                changes.append(f"+{item}")
 
-        if char.intelligence != updated_char.intelligence:
-            changes.append(f"INT: {char.intelligence} -> {updated_char.intelligence}")
-            char.intelligence = updated_char.intelligence
-
-        if char.agility != updated_char.agility:
-            changes.append(f"AGI: {char.agility} -> {updated_char.agility}")
-            char.agility = updated_char.agility
-
-        # Update health (clamp to maximum)
-        if char.current_health != updated_char.current_health:
-            old_health = char.current_health
-            char.current_health = max(
-                0, min(updated_char.current_health, char.maximum_health)
-            )
-            changes.append(f"Health: {old_health} -> {char.current_health}")
-
-        # Update inventory (replace entirely with new inventory)
-        old_inventory = set(char.inventory)
-        new_inventory = set(updated_char.inventory)
-
-        added = new_inventory - old_inventory
-        removed = old_inventory - new_inventory
-
-        if added:
-            changes.append(f"Gained: {', '.join(added)}")
-        if removed:
-            changes.append(f"Lost: {', '.join(removed)}")
-
-        char.inventory = updated_char.inventory
-
-        # Update skills (track changes like inventory)
-        old_skills = set(char.skills)
-        new_skills = set(updated_char.skills)
-
-        gained_skills = new_skills - old_skills
-        lost_skills = old_skills - new_skills
-
-        if gained_skills:
-            changes.append(f"Learned: {', '.join(gained_skills)}")
-        if lost_skills:
-            changes.append(f"Forgot: {', '.join(lost_skills)}")
-
-        char.skills = updated_char.skills
-
-        # Update backstory, appearance, and personality if they changed (shouldn't normally change)
-        if char.backstory != updated_char.backstory:
-            char.backstory = updated_char.backstory
-        if char.appearance != updated_char.appearance:
-            char.appearance = updated_char.appearance
-        if char.personality != updated_char.personality:
-            char.personality = updated_char.personality
+        # Remove items
+        for item in inv_change.items_removed:
+            if item in char.inventory:
+                char.inventory.remove(item)
+                changes.append(f"-{item}")
 
         if changes:
-            logger.info(f"Updated {char.name}: {', '.join(changes)}")
+            logger.info(f"Updated {char.name} inventory: {', '.join(changes)}")
+
+    # Apply skill changes
+    for skill_change in generated_scene.skill_changes:
+        if skill_change.character_name not in char_dict:
+            logger.warning(
+                f"Skill change for unknown character: {skill_change.character_name}. Skipping."
+            )
+            continue
+
+        char = char_dict[skill_change.character_name]
+        changes = []
+
+        # Learn new skills
+        for skill in skill_change.skills_learned:
+            if skill not in char.skills:
+                char.skills.append(skill)
+                changes.append(f"Learned: {skill}")
+
+        # Lose skills
+        for skill in skill_change.skills_lost:
+            if skill in char.skills:
+                char.skills.remove(skill)
+                changes.append(f"Lost: {skill}")
+
+        if changes:
+            logger.info(f"Updated {char.name} skills: {', '.join(changes)}")
+
+    # Apply stat changes (rare)
+    for stat_change in generated_scene.stat_changes:
+        if stat_change.character_name not in char_dict:
+            logger.warning(
+                f"Stat change for unknown character: {stat_change.character_name}. Skipping."
+            )
+            continue
+
+        char = char_dict[stat_change.character_name]
+        changes = []
+
+        if stat_change.strength_change != 0:
+            old_str = char.strength
+            char.strength = max(0, min(20, char.strength + stat_change.strength_change))
+            changes.append(f"STR: {old_str} -> {char.strength}")
+
+        if stat_change.intelligence_change != 0:
+            old_int = char.intelligence
+            char.intelligence = max(
+                0, min(20, char.intelligence + stat_change.intelligence_change)
+            )
+            changes.append(f"INT: {old_int} -> {char.intelligence}")
+
+        if stat_change.agility_change != 0:
+            old_agi = char.agility
+            char.agility = max(0, min(20, char.agility + stat_change.agility_change))
+            changes.append(f"AGI: {old_agi} -> {char.agility}")
+
+        if changes:
+            logger.info(
+                f"Updated {char.name} stats: {', '.join(changes)} (Reason: {stat_change.reason})"
+            )
 
     return characters
 
@@ -829,9 +877,21 @@ def _process_scene_assets(
             # Asset exists, use existing one
             if asset_ref.is_visible:
                 visible_asset_ids.append(existing_asset_id)
-            logger.info(f"Reusing existing asset: {asset_ref.name}")
+            logger.info(
+                f"✓ Reusing existing asset: '{asset_ref.name}' (matched with existing '{existing_assets[existing_asset_id].name}')"
+            )
         else:
-            # New asset, create it
+            # New asset - log all existing assets for debugging
+            if existing_assets:
+                existing_names = [f"'{a.name}'" for a in existing_assets.values()]
+                logger.info(
+                    f"✗ Creating NEW asset: '{asset_ref.name}' (type: {asset_ref.type}) - Did not match any existing: {', '.join(existing_names)}"
+                )
+            else:
+                logger.info(
+                    f"✓ Creating first asset: '{asset_ref.name}' (type: {asset_ref.type})"
+                )
+
             new_asset = Asset(
                 name=asset_ref.name,
                 type=asset_ref.type,
@@ -847,7 +907,7 @@ def _process_scene_assets(
                     new_asset.image_path = (
                         f"/static/assets/{game_id}/{asset_image_path.name}"
                     )
-                logger.info(f"Created new asset: {new_asset.name} ({new_asset.type})")
+                logger.info("  → Asset image generated successfully")
             except Exception as e:
                 logger.error(
                     f"Failed to generate image for asset {new_asset.name}: {e}"
@@ -984,14 +1044,46 @@ For dialogue prompts:
   
 CRITICAL: For ANY dice_check prompt, you MUST set either target_character (string) or target_characters (array). Never null.
 
-CRITICAL RULES FOR CHARACTER UPDATES:
-- ALWAYS return updated_characters array with ALL party members
-- Re-generate complete character data (stats, health, skills, inventory) based on what happened in the scene
-- Update current_health for characters who took damage or were healed (keep stats same unless permanently changed)
-- Update skills if a character learns a new ability or loses one (rare, but possible)
-- Update inventory to reflect items gained, lost, used, or consumed
-- If nothing happened to a character, return them unchanged
-- Keep backstory, appearance, and personality the same (these don't change during adventures)
+CRITICAL RULES FOR CHARACTER CHANGES (SIMPLIFIED APPROACH):
+- Instead of regenerating full character sheets, report ONLY what CHANGED in THIS scene
+- Use the change arrays: health_changes, inventory_changes, skill_changes, stat_changes
+- Empty arrays mean no changes of that type occurred
+
+HEALTH CHANGES (health_changes array):
+  * Report ONLY damage or healing that occurred in THIS scene
+  * Use negative values for damage, positive for healing
+  * CRITICAL: These are CHANGES (deltas), not absolute values
+  
+  * EXAMPLES:
+    - Character takes 15 damage: {"character_name": "Theron", "health_change": -15, "reason": "goblin attack"}
+    - Character healed for 20: {"character_name": "Elara", "health_change": 20, "reason": "healing potion"}
+    - Character unaffected: Don't include them in the array
+  
+  * This approach eliminates confusion - you only report what happened THIS scene
+  * No need to know previous health - just report the change amount
+
+INVENTORY CHANGES (inventory_changes array):
+  * Report items gained or lost in THIS scene only
+  * EXAMPLES:
+    - Gained items: {"character_name": "Theron", "items_added": ["Magic Sword", "Gold Coins"], "items_removed": []}
+    - Lost items: {"character_name": "Elara", "items_added": [], "items_removed": ["Rope", "Torch"]}
+    - Used potion: {"character_name": "Gareth", "items_added": [], "items_removed": ["Health Potion"]}
+    - No change: Don't include character in array
+
+SKILL CHANGES (skill_changes array):
+  * Report skills learned or lost in THIS scene (rare)
+  * EXAMPLES:
+    - Learned skill: {"character_name": "Theron", "skills_learned": ["Advanced Combat"], "skills_lost": []}
+    - Lost skill: {"character_name": "Elara", "skills_learned": [], "skills_lost": ["Stealth"]} (due to injury/curse)
+    - No change: Empty array (most scenes)
+
+STAT CHANGES (stat_changes array):
+  * Report permanent stat changes in THIS scene (very rare)
+  * Use for curses, blessings, transformations, permanent effects
+  * EXAMPLES:
+    - Cursed: {"character_name": "Theron", "strength_change": -2, "intelligence_change": 0, "agility_change": 0, "reason": "witch's curse"}
+    - Blessed: {"character_name": "Elara", "strength_change": 0, "intelligence_change": 3, "agility_change": 0, "reason": "ancient tome"}
+    - No change: Empty array (almost all scenes)
 
 CRITICAL: NARRATE ALL CHARACTER SHEET CHANGES IN SCENE TEXT:
 - If a character takes damage, EXPLICITLY state how much health they lose in the narrative
@@ -1009,6 +1101,15 @@ CRITICAL: NARRATE ALL CHARACTER SHEET CHANGES IN SCENE TEXT:
 - If a character learns a new skill, describe how they acquired it
   * Example: "Through intense practice, you've mastered the art of Stealth."
 - Players should NEVER be surprised by character sheet changes - everything must be clear in the story
+
+CRITICAL: SPECIFY EXACT COUNTS IN SCENE TEXT:
+- When groups of enemies, NPCs, or creatures appear, ALWAYS mention the exact count in the narrative
+  * Example: "Two bandits step out from behind the rocks, weapons drawn."
+  * Example: "Three wolves emerge from the shadows, circling your party."
+  * Example: "Four guards block the entrance to the throne room."
+- DO NOT use vague terms like "some enemies", "several bandits", "a group of wolves"
+- The count in scene_text MUST match the count in visual_description and assets_present
+- This ensures players understand exactly what they're facing and images match the narrative
 
 CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
 - ALWAYS include game_status in your response - it is a REQUIRED field
@@ -1032,36 +1133,87 @@ CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
   * name: The name of the NPC or object
   * type: "npc" for characters, "object" for items/places/things
   * description: Physical description for image generation
-  * is_visible: true if it should appear in the scene image, false if only mentioned
-- CRITICAL: If referencing an NPC or object that was already introduced in previous scenes:
-  * Use the EXACT same name as before (check EXISTING ASSETS list if provided)
-  * Use the EXACT same physical description
-  * This ensures visual consistency - same name = same appearance
-- For new NPCs/objects appearing for the first time:
+  * is_visible: MUST be true ONLY if the NPC/object is PHYSICALLY PRESENT in the current scene location
+  * is_visible: MUST be false if the NPC/object is only mentioned, talked about, in another location, or not directly visible
+- CRITICAL is_visible RULES:
+  * Set is_visible=true: NPC is in the room/area with the party, object is visible in the scene
+  * Set is_visible=false: NPC is somewhere else, object is mentioned but not present, talked about but not seen
+  * Example: If party discusses a villain who is in a distant location, is_visible=false
+  * Example: If party sees a door/portal directly in front of them, is_visible=true
+  * Example: If an NPC mentions an item in another room that party can't see, is_visible=false
+- CRITICAL ASSET REUSE RULES (PREVENT DUPLICATES):
+  * ALWAYS check the EXISTING ASSETS list first before creating a new asset
+  * If an NPC or object was introduced in a previous scene, you MUST reuse it
+  * Use the EXACT SAME name (character-by-character identical, including capitalization, spacing, and punctuation)
+  * Use the EXACT SAME physical description (copy it word-for-word from EXISTING ASSETS)
+  * DO NOT create variations of the same name (e.g., if existing asset is "Guard Captain", don't create "The Guard Captain" or "Captain of the Guard")
+  * DO NOT add adjectives or modifiers to existing names (e.g., if existing is "Ancient Door", don't create "Large Ancient Door")
+  * When in doubt, if it could be the same NPC/object, REUSE the existing one
+  * Only create a NEW asset if it's genuinely a different NPC/object that has never appeared before
+- For genuinely new NPCs/objects appearing for the first time:
+  * Choose a clear, unique name that won't conflict with existing assets
   * Create a clear, detailed physical description
   * This description will be used to generate their consistent image
 - Examples:
-  * NPC: {"name": "Grelda the Merchant", "type": "npc", "description": "Elderly human woman with gray hair in a bun, wearing a blue merchant's robe, warm smile, kind eyes", "is_visible": true}
-  * Object: {"name": "Crystal of Souls", "type": "object", "description": "Glowing purple crystal the size of a fist, floating slightly, emitting ethereal wisps", "is_visible": true}
-  * Mentioned only: {"name": "The Dark Lord", "type": "npc", "description": "...", "is_visible": false}
+  * NPC present: {"name": "[NPC's actual name]", "type": "npc", "description": "[Physical description of NPC]", "is_visible": true}
+  * Object present: {"name": "[Object's actual name]", "type": "object", "description": "[Physical description of object]", "is_visible": true}
+  * NPC mentioned/elsewhere: {"name": "[NPC's actual name]", "type": "npc", "description": "[Physical description of NPC]", "is_visible": false}
+  * Object mentioned/not visible: {"name": "[Object's actual name]", "type": "object", "description": "[Physical description of object]", "is_visible": false}
 
 CRITICAL: VISUAL DESCRIPTION FOR IMAGE GENERATION:
 - Include a visual_description field separate from scene_text
 - This description is ONLY for the image generator - players will never see it
-- Describe the scene as if directing a fantasy artist:
-  * Camera angle and framing (wide shot, close-up, three-quarter view, etc.)
-  * Character positions and poses (who is where, what they're doing, body language)
-  * Lighting and atmosphere (golden hour, torchlight, shadows, mystical glow, etc.)
-  * Environment details (architecture, nature, weather, time of day)
-  * Mood and emotion (tense, triumphant, mysterious, chaotic, peaceful)
-  * Key visual focal points (what draws the eye first)
-- Keep it 3-5 sentences, focused on composition and visual storytelling
-- Example: "Wide shot of the party standing at the entrance of a crumbling stone temple, partially obscured by thick jungle vines. Golden sunset light filters through the canopy, casting dramatic shadows across weathered statues. The barbarian stands ready with weapon drawn in the foreground, while the mage examines ancient runes on the door frame. Atmosphere is tense and mysterious, with mist creeping along the ground."
+- MUST be comprehensive and detailed (8-12 sentences minimum) - treat this as precise direction for a fantasy artist
+- REQUIRED elements to describe in detail:
+  
+  1. CAMERA & FRAMING:
+     * Specify exact camera angle (wide shot, medium shot, close-up, bird's eye, low angle, etc.)
+     * Aspect ratio reminder: LANDSCAPE/HORIZONTAL (16:9)
+     * What is in foreground, midground, background
+  
+  2. EACH CHARACTER IN SCENE (describe ALL party members present):
+     * Name each character explicitly
+     * Their exact position in the scene (left/right/center, foreground/background, distance from camera)
+     * Body position and stance (standing/crouching/kneeling, facing direction, body angle to camera)
+     * What they're doing with their hands/arms (weapon drawn, casting spell, examining object, gesturing)
+     * Facial expression and where they're looking
+     * Body language conveying emotion/intent
+  
+  3. IMPORTANT OBJECTS/NPCs (describe ALL visible assets):
+     * CRITICAL: If describing groups (enemies, guards, creatures), specify EXACT COUNT (e.g., "two [enemy type]", "three [creature type]", "four [NPC type]")
+     * Name each important object or NPC explicitly
+     * If there are multiple similar NPCs (enemies, guards), describe each one's position individually
+     * Exact placement in the scene for each individual
+     * Size relative to characters
+     * State/condition (glowing, damaged, active, dormant, etc.)
+     * How characters are interacting with them (if applicable)
+  
+  4. ENVIRONMENT:
+     * Specific location type and architectural/natural features
+     * Time of day and weather conditions
+     * Key environmental details (textures, materials, vegetation, terrain)
+     * Spatial layout (how elements are arranged in 3D space)
+  
+  5. LIGHTING & ATMOSPHERE:
+     * Primary light source(s) and direction
+     * Quality of light (harsh/soft, warm/cool, colored/white)
+     * Shadows and how they fall
+     * Atmospheric effects (fog, dust, magic glow, particles, etc.)
+     * Overall mood and emotional tone
+  
+  6. FOCAL POINTS:
+     * What draws the viewer's eye first
+     * Visual hierarchy of elements
+  
+- Write as clear, specific directions - avoid vague terms
+- CRITICAL for groups: Always specify exact counts (e.g., "two [enemies]", not "[enemies]" or "several [enemies]")
+- CRITICAL: Only describe what should actually appear in the image - image generator follows this literally
+- Example format with counted NPCs: "Medium wide shot from [angle]. In the foreground left, [Character A] stands with [action/pose], facing right toward two [enemy/NPC type], [expression/stance]. The first [enemy] is in the right foreground, [specific pose/action]. The second [enemy] is [position], [specific pose/action]. Center background, [Character B] [action/pose]. Far right, [Character C] [action/pose]. In the midground, [important object] with [details], [size/placement]. The scene is set in [location type] with [environmental features]. Lighting is [light description] creating [shadow effects]. [Additional atmospheric elements]. Atmosphere is [mood], with [final atmospheric details]."
 
 Return your response in this JSON structure (ALL FIELDS REQUIRED):
 {
   "scene_text": "The vivid narrative of the scene...",
-  "visual_description": "Detailed visual description for image generation (3-5 sentences describing composition, lighting, poses, atmosphere)...",
+  "visual_description": "COMPREHENSIVE visual description for image generation (8-12+ sentences with detailed camera angle, each character's position/pose/expression, all visible objects/NPCs placement, environment details, lighting setup, and atmosphere)...",
   "prompt": {
     "type": "dialogue" | "action" | "dice_check",
     "dice_type": "d6" | "d10" (only if type is dice_check, always single die roll),
@@ -1069,18 +1221,34 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
     "target_characters": ["Char1", "Char2"] (for multi-character dice_check or action) or null,
     "prompt_text": "The question or instruction for the player(s)"
   },
-  "updated_characters": [
+  "health_changes": [
     {
-      "name": "Character Name",
-      "strength": stat_value,
-      "intelligence": stat_value,
-      "agility": stat_value,
-      "current_health": current_health_value,
-      "backstory": "same as before",
-      "appearance": "same as before",
-      "personality": "same as before",
-      "skills": ["current", "skills", "list"],
-      "inventory": ["current", "items", "list"]
+      "character_name": "Character Name",
+      "health_change": -15 (negative for damage, positive for healing),
+      "reason": "brief explanation"
+    }
+  ],
+  "inventory_changes": [
+    {
+      "character_name": "Character Name",
+      "items_added": ["New Item 1", "New Item 2"],
+      "items_removed": ["Used Item"]
+    }
+  ],
+  "skill_changes": [
+    {
+      "character_name": "Character Name",
+      "skills_learned": ["New Skill"],
+      "skills_lost": []
+    }
+  ],
+  "stat_changes": [
+    {
+      "character_name": "Character Name",
+      "strength_change": 0,
+      "intelligence_change": 2,
+      "agility_change": 0,
+      "reason": "blessed by ancient tome"
     }
   ],
   "assets_present": [
@@ -1285,9 +1453,7 @@ Make the scene immersive, clear, and exciting!
     )
 
     # Apply character updates from the scene
-    updated_characters = _apply_character_updates(
-        characters, generated.updated_characters
-    )
+    updated_characters = _apply_character_updates(characters, generated)
 
     # Process assets and generate images in background thread
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
@@ -1510,9 +1676,7 @@ Continue the adventure!
     )
 
     # Apply character updates from the scene
-    updated_characters = _apply_character_updates(
-        characters, generated.updated_characters
-    )
+    updated_characters = _apply_character_updates(characters, generated)
 
     # Process assets and generate images in background thread
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
