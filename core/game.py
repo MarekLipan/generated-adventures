@@ -74,21 +74,31 @@ async def generate_opening_scene(game_id: str):
     if not game or not game.scenario_name or not game.characters:
         return
 
-    # Generate the very first scene for the players (and get updated character states and assets)
+    # Generate initial locations for the adventure if not already done
+    if not game.locations:
+        game.locations = await generator.generate_initial_locations(
+            game.scenario_name,
+            game.scenario_details,
+        )
+
+    # Generate the very first scene for the players (and get updated character states, assets, and locations)
     (
         opening_scene,
         updated_characters,
         updated_assets,
+        updated_locations,
     ) = await generator.generate_opening_scene(
         game_id,
         game.scenario_name,
         game.scenario_details or "",
         game.characters,
         game.assets,
+        game.locations,
     )
     game.scenes.append(opening_scene)
     game.characters = updated_characters  # Update character states
     game.assets = updated_assets  # Update assets
+    game.locations = updated_locations  # Update locations
 
     persistence.save_game(game)
 
@@ -141,6 +151,7 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         next_scene,
         updated_characters,
         updated_assets,
+        updated_locations,
     ) = await generator.generate_next_scene(
         game_id=game_id,
         scenario_name=game_state.scenario_name or "",
@@ -150,9 +161,11 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         player_action=player_action,
         conversation_history=conversation_history,
         existing_assets=game_state.assets,
+        existing_locations=game_state.locations,
     )
     game_state.scenes.append(next_scene)
     game_state.characters = updated_characters  # Update character states
     game_state.assets = updated_assets  # Update assets
+    game_state.locations = updated_locations  # Update locations
     persistence.save_game(game_state)
     return next_scene

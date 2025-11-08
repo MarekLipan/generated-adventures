@@ -26,9 +26,12 @@ from .models import (
     Character,
     GameStatus,
     GeneratedCharacterList,
+    GeneratedLocationList,
     GeneratedScenarioDetails,
     GeneratedScenarios,
     GeneratedScene,
+    Location,
+    LocationReference,
     Scene,
 )
 
@@ -658,6 +661,76 @@ Each field should be 2-4 paragraphs of rich, game-master-usable content for the 
     return markdown
 
 
+async def generate_initial_locations(
+    scenario_name: str,
+    scenario_details: Optional[str] = None,
+) -> dict[str, Location]:
+    """Generates initial set of locations for the adventure.
+
+    Args:
+        scenario_name: Name of the scenario
+        scenario_details: Optional markdown details about the scenario
+
+    Returns:
+        Dictionary mapping location IDs to Location objects
+    """
+    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
+    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    agent = Agent(model=model, output_type=GeneratedLocationList)
+
+    logger.info(f"Generating initial locations for scenario: {scenario_name}")
+
+    # Build context-aware prompt
+    context_section = ""
+    if scenario_details:
+        context_section = f"""
+SCENARIO CONTEXT:
+{scenario_details}
+
+Use the above scenario details to create locations that fit naturally into this world and support the plot/quest.
+
+"""
+
+    prompt = f"""
+Generate 4-6 diverse and memorable locations for a fantasy adventure named '{scenario_name}'.
+These locations will serve as settings for scenes throughout the adventure.
+
+{context_section}For each location, provide:
+- name: Memorable name (e.g., "The Crimson Tavern", "Shadowfen Swamp", "Dragon's Peak Summit")
+- location_type: One of: indoor, outdoor, underground, aerial, aquatic, mystical
+- description: Extensive physical description (3-5 sentences) including architecture/terrain, materials, scale, layout
+- key_features: 3-5 distinctive features that make this location unique and memorable
+- atmosphere: The general mood and feel (1-2 sentences)
+- lighting_default: Default lighting conditions (e.g., "torch-lit", "moonlit", "bright daylight", "bioluminescent glow")
+
+Make each location visually distinct and narratively useful. Include a mix of location types (indoor/outdoor/etc).
+Ensure locations support different story beats: safe havens, dangerous areas, mysterious places, social hubs, etc.
+"""
+    result = await retry_on_overload(agent.run, prompt)
+    generated_locations = result.output.locations
+
+    logger.info(f"=== {len(generated_locations)} Initial Locations Generated ===")
+    logger.info(f"Locations: {result.output.model_dump_json(indent=2)}")
+
+    # Convert to Location objects with IDs
+    locations_dict: dict[str, Location] = {}
+    for gen_loc in generated_locations:
+        location = Location(
+            name=gen_loc.name,
+            location_type=gen_loc.location_type,
+            description=gen_loc.description,
+            key_features=gen_loc.key_features,
+            atmosphere=gen_loc.atmosphere,
+            lighting_default=gen_loc.lighting_default,
+        )
+        locations_dict[location.id] = location
+        logger.info(
+            f"Created location '{location.name}' (ID: {location.id}, Type: {location.location_type})"
+        )
+
+    return locations_dict
+
+
 def _apply_character_updates(
     characters: List[Character], generated_scene
 ) -> List[Character]:
@@ -839,6 +912,35 @@ def _format_existing_assets(assets: dict[str, Asset]) -> str:
     )
 
 
+def _format_existing_locations(locations: dict[str, Location]) -> str:
+    """Format existing locations for inclusion in prompts.
+
+    Args:
+        locations: Dictionary mapping location IDs to Location objects
+
+    Returns:
+        Formatted string listing available locations
+    """
+    if not locations:
+        return "No available locations yet."
+
+    location_lines = []
+    for loc_id, location in locations.items():
+        features_str = ", ".join(location.key_features[:3])  # First 3 features
+        location_lines.append(
+            f"- **{location.name}** (ID: `{loc_id}`, Type: {location.location_type})\n"
+            f"  Description: {location.description}\n"
+            f"  Key Features: {features_str}\n"
+            f"  Atmosphere: {location.atmosphere}\n"
+            f"  Lighting: {location.lighting_default}"
+        )
+
+    return (
+        "AVAILABLE LOCATIONS (choose from these for location_reference):\n"
+        + "\n\n".join(location_lines)
+    )
+
+
 def _process_scene_assets(
     game_id: str,
     scene_id: int,
@@ -919,6 +1021,41 @@ def _process_scene_assets(
                 visible_asset_ids.append(new_asset.id)
 
     return updated_assets, visible_asset_ids
+
+
+def _process_scene_location(
+    location_reference: Optional[LocationReference],
+    existing_locations: dict[str, Location],
+) -> tuple[dict[str, Location], Optional[LocationReference]]:
+    """Process location from generated scene and create new location if needed.
+
+    Args:
+        location_reference: LocationReference from the generated scene (may be None)
+        existing_locations: Dictionary of existing locations
+
+    Returns:
+        Tuple of (updated locations dictionary, processed location reference)
+    """
+    if location_reference is None:
+        return existing_locations, None
+
+    updated_locations = existing_locations.copy()
+
+    # Check if location_id is provided and exists
+    if location_reference.location_id in existing_locations:
+        # Reusing existing location
+        existing_loc = existing_locations[location_reference.location_id]
+        logger.info(
+            f"✓ Reusing existing location: '{existing_loc.name}' (ID: {location_reference.location_id})"
+        )
+        return updated_locations, location_reference
+
+    # Location ID not found - this shouldn't normally happen as LLM should provide valid IDs
+    # But if it does, we'll just return without the location rather than creating incomplete data
+    logger.warning(
+        f"⚠ Location ID {location_reference.location_id} not found in existing locations. Scene will have no location reference."
+    )
+    return updated_locations, None
 
 
 def _generate_asset_image_sync(
@@ -1259,8 +1396,57 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
       "is_visible": true | false
     }
   ],
+  "location_reference": {
+    "location_id": "UUID of the location from AVAILABLE LOCATIONS list",
+    "time_of_day": "dawn" | "midday" | "afternoon" | "dusk" | "night" | null (optional variation),
+    "weather": "clear" | "rainy" | "stormy" | "foggy" | "snowing" | null (optional, for outdoor locations),
+    "state_changes": ["description of any changes to location", "..."] (optional, e.g., ["tables overturned", "fire damage"]),
+    "camera_angle": "wide establishing shot" | "close interior view" | "aerial view" | "low angle" | null (optional),
+    "focus_area": "specific area to emphasize" | null (optional, e.g., "the bar area", "the throne", "the entrance")
+  } | null,
   "game_status": "ongoing" | "completed" | "failed"
 }
+
+CRITICAL RULES FOR LOCATIONS:
+- ALWAYS include location_reference for every scene (or null if truly no specific location applies)
+- Choose from the AVAILABLE LOCATIONS list provided in the prompt
+- REUSE existing locations when narratively appropriate:
+  * If party returns to a tavern, reuse the tavern location_id
+  * If continuing in same area, reuse the same location_id
+  * Locations provide visual consistency across scenes in same place
+
+IMPORTANT - RELATIONSHIP BETWEEN location_reference AND visual_description:
+- The location_reference provides CONTEXT that should be incorporated into visual_description
+- When writing visual_description, use the location's description, key_features, and variations
+- Workflow: 
+  1. Set location_reference with location_id and any variations
+  2. Write visual_description that naturally incorporates:
+     - Location's physical description and key features
+     - Time of day (affects lighting: dawn=soft, midday=bright, dusk=golden, night=dark)
+     - Weather (affects atmosphere: rainy=wet/gloomy, stormy=dramatic, foggy=mysterious)
+     - State changes (damaged furniture, broken doors, scorch marks, etc.)
+     - Camera angle suggestion (but feel free to adjust for best composition)
+     - Focus area (emphasize that part while maintaining overall scene)
+- Example: If location_reference has time_of_day='dusk', camera_angle='wide shot', focus_area='entrance'
+  Then visual_description might be: "Wide shot of the tavern entrance bathed in golden dusk light..."
+- The visual_description is the complete, unified description used for image generation
+- Location variations add diversity while maintaining consistent features
+
+- Use the location variations to add visual diversity:
+  * time_of_day: Change time to show passage of time (dawn -> midday -> dusk -> night)
+  * weather: For outdoor locations, vary weather conditions
+  * state_changes: After battles or events, describe damage/changes to location
+  * camera_angle: Vary the view (wide shot, close-up, different angles)
+  * focus_area: Emphasize different parts of the same location
+- Examples of good location reuse with variation:
+  * Same tavern, different time: morning crowd vs late night
+  * Same forest, different weather: sunny morning vs stormy afternoon  
+  * Same throne room, different focus: wide view of whole room vs close on throne
+  * Same location after battle: add state_changes like "broken furniture", "scorch marks"
+- This allows visual consistency (same location features) while avoiding repetitive images
+- For NEW locations not in the list, choose the CLOSEST match from available locations
+  * If moving to new area, pick the most appropriate existing location type
+  * Don't request new locations - work with what's available
 """
 
 
@@ -1354,8 +1540,9 @@ async def generate_opening_scene(
     scenario_details: str,
     characters: List[Character],
     existing_assets: dict[str, Asset],
+    existing_locations: dict[str, Location],
     scene_id: int = 1,
-) -> tuple[Scene, List[Character], dict[str, Asset]]:
+) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the opening scene for the chosen scenario.
 
     Args:
@@ -1364,10 +1551,11 @@ async def generate_opening_scene(
         scenario_details: Full markdown details about the scenario
         characters: List of Character objects in the party (with full stats, inventory, backstory)
         existing_assets: Dictionary of existing assets (NPCs/objects) for consistency
+        existing_locations: Dictionary of existing locations for consistency
         scene_id: Scene identifier (default 1 for opening)
 
     Returns:
-        Tuple of (Scene object, Updated character list, Updated assets dictionary)
+        Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
@@ -1402,6 +1590,8 @@ PARTY CHARACTER SHEETS:
 {character_sheets}
 
 {_format_existing_assets(existing_assets)}
+
+{_format_existing_locations(existing_locations)}
 
 Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
 
@@ -1454,6 +1644,12 @@ Make the scene immersive, clear, and exciting!
 
     # Apply character updates from the scene
     updated_characters = _apply_character_updates(characters, generated)
+
+    # Process locations
+    updated_locations, processed_location_ref = _process_scene_location(
+        generated.location_reference,
+        existing_locations,
+    )
 
     # Process assets and generate images in background thread
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
@@ -1529,7 +1725,8 @@ Make the scene immersive, clear, and exciting!
         visible_asset_ids,
     )
     scene.voiceover_path = voiceover_web_path
-    return scene, updated_characters, updated_assets
+    scene.location_reference = processed_location_ref
+    return scene, updated_characters, updated_assets, updated_locations
 
 
 async def generate_next_scene(
@@ -1541,7 +1738,8 @@ async def generate_next_scene(
     player_action: Optional[str],
     conversation_history: List[dict],
     existing_assets: dict[str, Asset],
-) -> tuple[Scene, List[Character], dict[str, Asset]]:
+    existing_locations: dict[str, Location],
+) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the next scene based on the story so far and player action.
 
     Args:
@@ -1553,9 +1751,10 @@ async def generate_next_scene(
         player_action: The player's response to the last prompt
         conversation_history: List of dicts containing scene_text, prompt, and player_action for full context
         existing_assets: Dictionary of existing assets (NPCs/objects) for consistency
+        existing_locations: Dictionary of existing locations for consistency
 
     Returns:
-        Tuple of (Scene object, Updated character list, Updated assets dictionary)
+        Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
@@ -1647,6 +1846,8 @@ PARTY CHARACTER SHEETS:
 
 {_format_existing_assets(existing_assets)}
 
+{_format_existing_locations(existing_locations)}
+
 {history_context}{action_context}{dice_check_rules}
 
 Generate the next scene in this adventure. The scene should:
@@ -1677,6 +1878,12 @@ Continue the adventure!
 
     # Apply character updates from the scene
     updated_characters = _apply_character_updates(characters, generated)
+
+    # Process locations
+    updated_locations, processed_location_ref = _process_scene_location(
+        generated.location_reference,
+        existing_locations,
+    )
 
     # Process assets and generate images in background thread
     client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
@@ -1752,4 +1959,5 @@ Continue the adventure!
         visible_asset_ids,
     )
     scene.voiceover_path = voiceover_web_path
-    return scene, updated_characters, updated_assets
+    scene.location_reference = processed_location_ref
+    return scene, updated_characters, updated_assets, updated_locations

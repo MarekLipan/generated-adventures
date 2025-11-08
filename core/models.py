@@ -32,6 +32,71 @@ class Asset(BaseModel):
     )
 
 
+class Location(BaseModel):
+    """Represents a location where scenes take place, providing rich context for visual consistency."""
+
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier for the location",
+    )
+    name: str = Field(
+        ...,
+        description="Name of the location (e.g., 'The Crimson Tavern', 'Dragon's Peak Mountains')",
+    )
+    location_type: Literal[
+        "indoor", "outdoor", "underground", "aerial", "aquatic", "mystical"
+    ] = Field(
+        ...,
+        description="Type of location: indoor, outdoor, underground, aerial, aquatic, mystical",
+    )
+    description: str = Field(
+        ...,
+        description="Extensive physical description of the location including architecture, layout, materials, scale",
+    )
+    key_features: List[str] = Field(
+        default_factory=list,
+        description="List of distinctive features (e.g., 'massive oak beams', 'crystal chandelier', 'ancient runes')",
+    )
+    atmosphere: str = Field(
+        ...,
+        description="General mood and atmosphere (e.g., 'warm and welcoming', 'dark and foreboding', 'ethereal')",
+    )
+    lighting_default: str = Field(
+        ...,
+        description="Default lighting conditions (e.g., 'torch-lit', 'moonlit', 'bright daylight', 'bioluminescent')",
+    )
+
+
+class LocationReference(BaseModel):
+    """References a location in a specific scene with scene-specific variations.
+
+    These fields provide CONTEXT for the visual_description, not rigid directives.
+    The visual_description will incorporate this location context naturally.
+    """
+
+    location_id: str = Field(..., description="ID of the Location being referenced")
+    time_of_day: Optional[str] = Field(
+        None,
+        description="Time of day variation (e.g., 'dawn', 'midday', 'dusk', 'night'). Provides context for lighting in visual_description.",
+    )
+    weather: Optional[str] = Field(
+        None,
+        description="Weather conditions if outdoor (e.g., 'clear', 'rainy', 'stormy', 'foggy', 'snowing'). Provides context for atmosphere in visual_description.",
+    )
+    state_changes: List[str] = Field(
+        default_factory=list,
+        description="Specific changes to location state (e.g., 'tables overturned', 'doors broken', 'fire damage'). Context for visual_description.",
+    )
+    camera_angle: Optional[str] = Field(
+        None,
+        description="Suggested camera perspective (e.g., 'wide establishing shot', 'close interior view', 'aerial view'). Suggestion for visual_description composition, not a strict requirement.",
+    )
+    focus_area: Optional[str] = Field(
+        None,
+        description="Specific area to emphasize (e.g., 'the bar area', 'the throne', 'the entrance'). Suggestion for visual_description focus, not a strict requirement.",
+    )
+
+
 class Character(BaseModel):
     """Represents a single character in the game."""
 
@@ -141,6 +206,10 @@ class Scene(BaseModel):
         default_factory=list,
         description="List of asset IDs that are visible in this scene's image",
     )
+    location_reference: Optional[LocationReference] = Field(
+        None,
+        description="Reference to the location where this scene takes place, with scene-specific variations",
+    )
     game_status: GameStatus = Field(
         default="ongoing",
         description="Status of the game: 'ongoing', 'completed' (victory), or 'failed' (game over)",
@@ -160,6 +229,10 @@ class Game(BaseModel):
     assets: dict[str, Asset] = Field(
         default_factory=dict,
         description="Dictionary mapping asset IDs to Asset objects for visual consistency tracking",
+    )
+    locations: dict[str, Location] = Field(
+        default_factory=dict,
+        description="Dictionary mapping location IDs to Location objects for visual consistency tracking",
     )
 
 
@@ -221,6 +294,27 @@ class GeneratedCharacterList(BaseModel):
     """Represents a list of generated characters."""
 
     characters: List[GeneratedCharacter]
+
+
+class GeneratedLocation(BaseModel):
+    """Represents a generated location for the LLM output."""
+
+    name: str = Field(..., description="Name of the location")
+    location_type: Literal[
+        "indoor", "outdoor", "underground", "aerial", "aquatic", "mystical"
+    ] = Field(..., description="Type of location")
+    description: str = Field(
+        ..., description="Extensive physical description of the location"
+    )
+    key_features: List[str] = Field(..., description="List of 3-5 distinctive features")
+    atmosphere: str = Field(..., description="General mood and atmosphere")
+    lighting_default: str = Field(..., description="Default lighting conditions")
+
+
+class GeneratedLocationList(BaseModel):
+    """Represents a list of generated locations."""
+
+    locations: List[GeneratedLocation]
 
 
 class CharacterHealthChange(BaseModel):
@@ -325,7 +419,7 @@ class GeneratedScene(BaseModel):
     )
     visual_description: str = Field(
         ...,
-        description="A detailed visual description of the scene for image generation purposes ONLY (not shown to players). Describe the composition, camera angle, character positions and poses, lighting, atmosphere, environment details, and mood. Focus on visual elements that would make a compelling scene illustration. 3-5 sentences.",
+        description="A detailed visual description of the scene for image generation purposes ONLY (not shown to players). Describe the composition, camera angle, character positions and poses, lighting, atmosphere, environment details, and mood. If location_reference is provided, incorporate the location's description, key features, and any variations (time_of_day, weather, state_changes, camera_angle, focus_area) naturally into this description. Focus on visual elements that would make a compelling scene illustration. 3-5 sentences.",
     )
     prompt: PromptType = Field(
         ...,
@@ -350,6 +444,10 @@ class GeneratedScene(BaseModel):
     assets_present: List[AssetReference] = Field(
         default_factory=list,
         description="List of important NPCs and objects present in this scene. Include any significant characters or items that should have consistent visual representation. MUST reuse existing asset names when referring to already-introduced NPCs/objects.",
+    )
+    location_reference: Optional[LocationReference] = Field(
+        None,
+        description="Reference to the location where this scene takes place. MUST reuse existing location ID if returning to a known location. The location context (including time_of_day, weather, state_changes, camera_angle, focus_area) provides input for the visual_description - incorporate these elements naturally when writing visual_description. Use variations to add diversity while maintaining location consistency.",
     )
     game_status: GameStatus = Field(
         default="ongoing",
