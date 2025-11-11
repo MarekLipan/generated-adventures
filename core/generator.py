@@ -224,82 +224,63 @@ def _generate_scene_image_sync(
 
     # Build prompt with scene context and visual description
     prompt_parts = [
-        "CRITICAL: Generate image in LANDSCAPE/HORIZONTAL orientation - width MUST be greater than height (16:9 aspect ratio).",
-        "Generate a high quality fantasy scene illustration.",
-        f"\nScenario: {scenario_name}",
-        "\n**VISUAL COMPOSITION (FOLLOW THIS CAREFULLY):**",
+        "🎯 CRITICAL PRIORITY #1 - CHARACTER VISUAL CONSISTENCY:",
+        "- CHARACTER REFERENCE IMAGES ARE PROVIDED BELOW - YOU MUST USE THEM",
+        "- Every character MUST look EXACTLY like their reference image (same face, same hair, same clothing, same equipment)",
+        "- This is THE MOST IMPORTANT requirement - consistency of character appearance across all scenes",
+        "- Match: facial features, hairstyle, hair color, clothing style, clothing colors, equipment, accessories",
+        "- If a character appears, they MUST be instantly recognizable from their reference image",
+        "",
+        "📐 FORMAT REQUIREMENT:",
+        "- Generate in LANDSCAPE/HORIZONTAL orientation (16:9 aspect ratio, width > height)",
+        "",
+        "🎨 SCENE COMPOSITION:",
         f"{visual_description}",
-        "\n**SCENE NARRATIVE CONTEXT:**",
-        f"{scene_text}",
-        "\n**IMPORTANT CHARACTER INSTRUCTIONS:**",
-        "- Use the provided character reference images for appearance consistency (faces, clothing, equipment)",
-        "- Use the provided asset reference images for NPC/object consistency (same appearance when reappearing)",
-        "- Characters should appear NATURALLY with poses and angles matching the visual composition described above",
-        "- DO NOT default to frontal/portrait poses - follow the visual description's guidance on angles and positioning",
-        "- Show appropriate facial expressions matching the scene's emotion and action",
-        "- Create depth with varied character positioning (closer, farther, partially visible)",
-        "- Match body language and poses to character personalities and the scene's mood",
+        "",
+        "📖 NARRATIVE CONTEXT:",
+        f"{scene_text[:500]}..."
+        if len(scene_text) > 500
+        else scene_text,  # Limit context to reduce complexity
+        "",
+        "✅ ADDITIONAL GUIDELINES:",
+        "- Use provided asset reference images for NPCs/objects (same consistency rule as characters)",
+        "- Only include characters/objects mentioned in the visual description",
+        "- Natural poses and angles matching the composition (not just frontal portraits)",
+        "- Painterly fantasy art style, cinematic, dramatic lighting",
+        f"- Environment: {scenario_name} fantasy setting",
     ]
-
-    # Add environmental and style consistency instructions
-    prompt_parts.append("\n**SCENE COMPOSITION GUIDELINES:**")
-    prompt_parts.append(
-        f"- Setting: {scenario_name} - ensure the environment matches the fantasy scenario theme"
-    )
-    prompt_parts.append(
-        "- Art style: Maintain consistent painterly fantasy art style - cinematic, atmospheric, dramatic lighting"
-    )
-    prompt_parts.append(
-        "- Character consistency: Use the provided character reference images to ensure party members look identical across scenes (same faces, clothing, equipment)"
-    )
-    prompt_parts.append(
-        "- NPC/Object consistency: Use the provided asset reference images to ensure NPCs and important objects look identical when they reappear (same appearance, features, design)"
-    )
-    prompt_parts.append(
-        "- Fresh compositions: Each scene should have unique framing, perspective, and camera angle - avoid repetitive layouts"
-    )
-    prompt_parts.append(
-        "- Environment accuracy: Match the narrative - indoor/outdoor, time of day, weather, lighting conditions"
-    )
-    prompt_parts.append(
-        "- CRITICAL: Only include characters and objects explicitly mentioned in the visual description"
-    )
-    prompt_parts.append(
-        "- CRITICAL: If the visual description specifies a COUNT (e.g., 'two enemies', 'three wolves'), show EXACTLY that number - DO NOT add extras"
-    )
-    prompt_parts.append(
-        "- CRITICAL: Do NOT add unnamed background characters, extra enemies, or random NPCs not specified in the visual description"
-    )
 
     # Add special instructions for ending scenes
     if game_status == "completed":
+        prompt_parts.append("")
         prompt_parts.append(
-            "\n🏆 VICTORY SCENE: This is the triumphant conclusion! Show epic victory, celebration, or peaceful resolution. Use dramatic, uplifting lighting (golden hour, radiant light). Emphasize heroic achievement and success."
+            "🏆 VICTORY SCENE: Triumphant conclusion with uplifting atmosphere"
         )
     elif game_status == "failed":
-        prompt_parts.append(
-            "\n💀 DEFEAT SCENE: This is the tragic ending. Show dramatic defeat, somber atmosphere, or fallen heroes. Use darker, dramatic lighting (shadows, dusk, stormy). Convey the weight of failure or sacrifice."
-        )
+        prompt_parts.append("")
+        prompt_parts.append("💀 DEFEAT SCENE: Dramatic defeat with somber atmosphere")
 
-    prompt_parts.extend(
-        [
-            "\nStyle: cinematic landscape composition, painterly, dramatic lighting, atmospheric, fantasy art, detailed environment, wide angle view.",
-            "\nCRITICAL FORMAT REQUIREMENT: Image MUST be in LANDSCAPE/HORIZONTAL orientation (wider than tall). Aspect ratio 16:9 or similar wide format.",
-        ]
-    )
-
-    prompt_text = " ".join(prompt_parts)
+    prompt_text = "\n".join(prompt_parts)
 
     # Prepare content with text prompt and reference images
     content_parts = [prompt_text]
 
     # Add character images as reference (if they exist)
+    character_count = 0
     for char in characters:
         if char.image_path:
             # Convert web path to file path
             char_image_file = pathlib.Path("webapp") / char.image_path.lstrip("/")
             if char_image_file.exists():
                 try:
+                    # Add text label before the image
+                    content_parts.append(
+                        f"\n📸 CHARACTER REFERENCE - {char.name.upper()}:"
+                    )
+                    content_parts.append(
+                        f"CRITICAL: This is {char.name}. Use THIS EXACT appearance in the scene."
+                    )
+
                     with open(char_image_file, "rb") as f:
                         image_data = f.read()
                     content_parts.append(
@@ -307,13 +288,20 @@ def _generate_scene_image_sync(
                             data=image_data, mime_type="image/png"
                         )
                     )
-                    logger.info(f"Added reference image for {char.name}")
+                    character_count += 1
+                    logger.info(f"✓ Added reference image for {char.name}")
                 except Exception as e:
                     logger.warning(
                         f"Could not load character image for {char.name}: {e}"
                     )
 
+    if character_count > 0:
+        content_parts.append(
+            f"\n✅ {character_count} character reference image(s) provided above. USE THEM for visual consistency."
+        )
+
     # Add asset images as reference (if they exist and are visible in this scene)
+    asset_count = 0
     if assets and visible_asset_ids:
         for asset_id in visible_asset_ids:
             asset = assets.get(asset_id)
@@ -322,6 +310,14 @@ def _generate_scene_image_sync(
                 asset_image_file = pathlib.Path("webapp") / asset.image_path.lstrip("/")
                 if asset_image_file.exists():
                     try:
+                        # Add text label before the image
+                        content_parts.append(
+                            f"\n📸 {asset.type.upper()} REFERENCE - {asset.name.upper()}:"
+                        )
+                        content_parts.append(
+                            f"This is {asset.name}. Use THIS appearance in the scene."
+                        )
+
                         with open(asset_image_file, "rb") as f:
                             image_data = f.read()
                         content_parts.append(
@@ -329,15 +325,23 @@ def _generate_scene_image_sync(
                                 data=image_data, mime_type="image/png"
                             )
                         )
+                        asset_count += 1
                         logger.info(
-                            f"Added reference image for asset: {asset.name} ({asset.type})"
+                            f"✓ Added reference image for asset: {asset.name} ({asset.type})"
                         )
                     except Exception as e:
                         logger.warning(
                             f"Could not load asset image for {asset.name}: {e}"
                         )
 
-    logger.info(f"Generating scene image for scene {scene_id} in game {game_id}")
+    if asset_count > 0:
+        content_parts.append(
+            f"\n✅ {asset_count} asset reference image(s) provided above. USE THEM for visual consistency."
+        )
+
+    logger.info(
+        f"Generating scene image for scene {scene_id} with {character_count} character refs, {asset_count} asset refs"
+    )
 
     try:
         from google.genai import types as genai_config  # type: ignore
