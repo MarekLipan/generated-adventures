@@ -27,11 +27,11 @@ from .models import (
     GameStatus,
     GeneratedCharacterList,
     GeneratedLocationList,
-    GeneratedScenarioDetails,
-    GeneratedScenarios,
+    GeneratedScenarioTemplate,
     GeneratedScene,
     Location,
     LocationReference,
+    ScenarioTemplate,
     Scene,
 )
 
@@ -224,12 +224,13 @@ def _generate_scene_image_sync(
 
     # Build prompt with scene context and visual description
     prompt_parts = [
-        "🎯 CRITICAL PRIORITY #1 - CHARACTER VISUAL CONSISTENCY:",
-        "- CHARACTER REFERENCE IMAGES ARE PROVIDED BELOW - YOU MUST USE THEM",
-        "- Every character MUST look EXACTLY like their reference image (same face, same hair, same clothing, same equipment)",
-        "- This is THE MOST IMPORTANT requirement - consistency of character appearance across all scenes",
+        "🎯 CRITICAL PRIORITY #1 - CHARACTER & ASSET VISUAL CONSISTENCY:",
+        "- REFERENCE IMAGES ARE PROVIDED BELOW FOR ALL VISIBLE CHARACTERS AND ASSETS - YOU MUST USE THEM",
+        "- Every character (party members + NPCs) MUST look EXACTLY like their reference image",
+        "- Every object/NPC MUST match their reference image exactly",
+        "- This is THE MOST IMPORTANT requirement - consistency of appearance across all scenes",
         "- Match: facial features, hairstyle, hair color, clothing style, clothing colors, equipment, accessories",
-        "- If a character appears, they MUST be instantly recognizable from their reference image",
+        "- If a character/asset appears, they MUST be instantly recognizable from their reference image",
         "",
         "📐 FORMAT REQUIREMENT:",
         "- Generate in LANDSCAPE/HORIZONTAL orientation (16:9 aspect ratio, width > height)",
@@ -243,7 +244,6 @@ def _generate_scene_image_sync(
         else scene_text,  # Limit context to reduce complexity
         "",
         "✅ ADDITIONAL GUIDELINES:",
-        "- Use provided asset reference images for NPCs/objects (same consistency rule as characters)",
         "- Only include characters/objects mentioned in the visual description",
         "- Natural poses and angles matching the composition (not just frontal portraits)",
         "- Painterly fantasy art style, cinematic, dramatic lighting",
@@ -265,42 +265,9 @@ def _generate_scene_image_sync(
     # Prepare content with text prompt and reference images
     content_parts = [prompt_text]
 
-    # Add character images as reference (if they exist)
-    character_count = 0
-    for char in characters:
-        if char.image_path:
-            # Convert web path to file path
-            char_image_file = pathlib.Path("webapp") / char.image_path.lstrip("/")
-            if char_image_file.exists():
-                try:
-                    # Add text label before the image
-                    content_parts.append(
-                        f"\n📸 CHARACTER REFERENCE - {char.name.upper()}:"
-                    )
-                    content_parts.append(
-                        f"CRITICAL: This is {char.name}. Use THIS EXACT appearance in the scene."
-                    )
-
-                    with open(char_image_file, "rb") as f:
-                        image_data = f.read()
-                    content_parts.append(
-                        genai_types.Part.from_bytes(
-                            data=image_data, mime_type="image/png"
-                        )
-                    )
-                    character_count += 1
-                    logger.info(f"✓ Added reference image for {char.name}")
-                except Exception as e:
-                    logger.warning(
-                        f"Could not load character image for {char.name}: {e}"
-                    )
-
-    if character_count > 0:
-        content_parts.append(
-            f"\n✅ {character_count} character reference image(s) provided above. USE THEM for visual consistency."
-        )
-
     # Add asset images as reference (if they exist and are visible in this scene)
+    # NOTE: Party characters are now also in the assets system (converted before first scene)
+    # so this loop handles BOTH party members AND other NPCs/objects with one unified approach
     asset_count = 0
     if assets and visible_asset_ids:
         for asset_id in visible_asset_ids:
@@ -336,11 +303,11 @@ def _generate_scene_image_sync(
 
     if asset_count > 0:
         content_parts.append(
-            f"\n✅ {asset_count} asset reference image(s) provided above. USE THEM for visual consistency."
+            f"\n✅ {asset_count} reference image(s) provided above (party members + other assets). USE THEM for visual consistency."
         )
 
     logger.info(
-        f"Generating scene image for scene {scene_id} with {character_count} character refs, {asset_count} asset refs"
+        f"Generating scene image for scene {scene_id} with {asset_count} total reference images (party + assets)"
     )
 
     try:
@@ -473,47 +440,6 @@ SCENE TO NARRATE:
         return None
 
 
-async def generate_scenarios(previously_played: list[str] | None = None) -> list[str]:
-    """Calls Google Gemini to generate scenarios.
-
-    Args:
-        previously_played: Optional list of scenario names that were already played,
-                          to ensure new scenarios are unique and distinct.
-    """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
-    agent = Agent(model=model, output_type=GeneratedScenarios)
-
-    # Build prompt with context about previously played scenarios
-    prompt = (
-        "Generate three distinct fantasy adventure scenarios. Provide only the names."
-    )
-
-    if previously_played:
-        previously_played_list = "\n".join(
-            f"- {scenario}" for scenario in previously_played
-        )
-        prompt = f"""Generate three NEW and distinct fantasy adventure scenarios.
-
-IMPORTANT: The following scenarios have ALREADY been played. Your new scenarios must be completely different and unique:
-
-{previously_played_list}
-
-Generate three fresh, creative fantasy adventure scenarios that are distinct from the ones listed above. 
-Consider different themes, settings, conflict types, and narrative hooks.
-Provide only the scenario names."""
-
-    logger.info(
-        f"Generating scenarios (avoiding {len(previously_played or [])} previously played)..."
-    )
-    result = await retry_on_overload(agent.run, prompt)
-
-    logger.info("=== Scenarios Generated ===")
-    logger.info(f"Scenarios: {result.output.model_dump_json(indent=2)}")
-
-    return result.output.scenarios
-
-
 async def generate_characters(
     game_id: str,
     scenario_name: str,
@@ -628,41 +554,122 @@ Skills should match the character's background, stats, and archetype.
     return final_characters
 
 
-async def generate_scenario_details(scenario_name: str) -> str:
-    """Generates the detailed story for the selected scenario.
+async def generate_scenario_template(
+    existing_scenarios: List[ScenarioTemplate],
+) -> ScenarioTemplate:
+    """Generates a complete new scenario template with contrastive prompting.
 
-    Returns a markdown string intended for DM notes.
+    Args:
+        existing_scenarios: List of all existing scenario templates (both played and unplayed)
+                          to ensure the new scenario is distinct and original
+
+    Returns:
+        ScenarioTemplate object with name, one_liner, and full DM notes
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-pro", provider=provider)
-    agent = Agent(model=model, output_type=GeneratedScenarioDetails)
+    agent = Agent(model=model, output_type=GeneratedScenarioTemplate)
 
-    logger.info(f"Generating scenario details for: {scenario_name}")
-    prompt = f"""
-You are a creative fantasy adventure designer.
-Return ONLY JSON matching this pydantic model fields (no markdown, no code fences):
-{{
-  "setting": "...",
-  "plot": "...",
-  "main_quest": "...",
-  "important_npcs": "..."
-}}
-Each field should be 2-4 paragraphs of rich, game-master-usable content for the scenario '{scenario_name}'.
-"""
-    result = await retry_on_overload(agent.run, prompt)
-    data = result.output
-
-    # Log scenario details
-    logger.info(f"=== Scenario Details Generated: {scenario_name} ===")
-    logger.info(f"Scenario details: {data.model_dump_json(indent=2)}")
-
-    markdown = (
-        f"## The Setting\n\n{data.setting}\n\n"
-        f"## The Plot\n\n{data.plot}\n\n"
-        f"## Main Quest\n\n{data.main_quest}\n\n"
-        f"## Important NPCs\n\n{data.important_npcs}\n"
+    logger.info(
+        f"Generating new scenario template (contrasting with {len(existing_scenarios)} existing scenarios)..."
     )
-    return markdown
+
+    # Build contrastive prompt with existing scenarios
+    contrastive_context = ""
+    if existing_scenarios:
+        scenario_summaries = []
+        for i, scenario in enumerate(
+            existing_scenarios[:10], 1
+        ):  # Limit to 10 most recent
+            scenario_summaries.append(
+                f"**Scenario {i}: {scenario.name}**\n"
+                f"Hook: {scenario.one_liner}\n"
+                f"Times Played: {scenario.times_played}\n"
+                f"DM Notes Preview: {scenario.dm_notes[:300]}..."
+            )
+
+        contrastive_context = f"""
+EXISTING SCENARIOS (create something DISTINCTLY DIFFERENT):
+
+{chr(10).join(scenario_summaries)}
+
+CRITICAL: Your new scenario MUST differ in at least 3 major aspects:
+1. Setting type/era (medieval village, space station, underwater city, floating islands, etc.)
+2. Quest structure (rescue mission, mystery investigation, treasure hunt, political intrigue, survival, etc.)
+3. Antagonist type (villain, natural disaster, curse, rival faction, internal conflict, etc.)
+4. Tone/atmosphere (horror, heroic fantasy, noir mystery, comedy, epic, gritty, whimsical, etc.)
+5. Core conflict (combat-focused, social/political, exploration, resource management, moral dilemma, etc.)
+
+Analyze the patterns in existing scenarios and deliberately create something novel.
+"""
+
+    prompt = f"""
+You are a creative fantasy adventure designer creating scenarios for a D&D-style tabletop RPG.
+
+{contrastive_context}
+
+Generate a COMPLETE scenario with the following components:
+
+1. **name**: A compelling, memorable scenario name (3-7 words)
+   - Examples: "The Curse of Ravenmoor", "Heist at the Skyport", "Whispers from the Deep"
+
+2. **one_liner**: A short, enticing hook (1-2 sentences) that attracts players WITHOUT spoiling the plot
+   - Should create mystery, excitement, or intrigue
+   - NO spoilers about villains, plot twists, or endings
+   - Examples: 
+     * "A cursed village where children vanish under the blood moon"
+     * "Rival treasure hunters race to claim an artifact in ancient sky ruins"
+     * "Political intrigue threatens to tear apart the kingdom's fragile peace"
+
+3. **setting**: Detailed description of the world/locale (2-4 rich paragraphs)
+   - Geography, climate, culture, history
+   - Key locations and landmarks
+   - Visual and atmospheric details
+
+4. **plot**: The narrative arc and story structure (2-4 paragraphs)
+   - Setup, complications, potential paths
+   - Key events and decision points
+   - How the story could unfold
+
+5. **main_quest**: The primary objective for the party (2-4 paragraphs)
+   - What the party needs to accomplish
+   - Why it matters
+   - Challenges they'll face
+   - Possible approaches and outcomes
+
+6. **important_npcs**: Key non-player characters (2-4 paragraphs)
+   - Describe 3-5 important NPCs with names, roles, motivations
+   - Include allies, neutrals, and antagonists
+   - Make them memorable and useful for roleplay
+
+Create a scenario that is fresh, engaging, and distinctly different from existing ones.
+Make it playable, fun, and full of opportunities for player choice and creativity.
+"""
+
+    result = await retry_on_overload(agent.run, prompt)
+    generated = result.output
+
+    # Log generated scenario
+    logger.info("=== Scenario Template Generated ===")
+    logger.info(f"Name: {generated.name}")
+    logger.info(f"One-liner: {generated.one_liner}")
+
+    # Convert to markdown DM notes
+    dm_notes = (
+        f"## The Setting\n\n{generated.setting}\n\n"
+        f"## The Plot\n\n{generated.plot}\n\n"
+        f"## Main Quest\n\n{generated.main_quest}\n\n"
+        f"## Important NPCs\n\n{generated.important_npcs}\n"
+    )
+
+    # Create ScenarioTemplate object
+    scenario_template = ScenarioTemplate(
+        name=generated.name,
+        one_liner=generated.one_liner,
+        dm_notes=dm_notes,
+    )
+
+    return scenario_template
 
 
 async def generate_initial_locations(
@@ -872,6 +879,10 @@ def _make_scene(
     image_path: str | None = None,
     game_status: GameStatus = "ongoing",
     visible_asset_ids: List[str] = None,
+    health_changes: List = None,
+    inventory_changes: List = None,
+    skill_changes: List = None,
+    stat_changes: List = None,
 ) -> Scene:
     """Helper to create a Scene object from generated data.
 
@@ -882,6 +893,10 @@ def _make_scene(
         image_path: Optional path to the scene image
         game_status: Status of the game ('ongoing', 'completed', 'failed')
         visible_asset_ids: List of asset IDs visible in this scene
+        health_changes: List of CharacterHealthChange objects from this scene
+        inventory_changes: List of CharacterInventoryChange objects from this scene
+        skill_changes: List of CharacterSkillChange objects from this scene
+        stat_changes: List of CharacterStatChange objects from this scene
     """
     return Scene(
         id=scene_id,
@@ -891,6 +906,10 @@ def _make_scene(
         voiceover_path=None,
         game_status=game_status,
         visible_asset_ids=visible_asset_ids or [],
+        health_changes=health_changes or [],
+        inventory_changes=inventory_changes or [],
+        skill_changes=skill_changes or [],
+        stat_changes=stat_changes or [],
     )
 
 
@@ -906,14 +925,32 @@ def _format_existing_assets(assets: dict[str, Asset]) -> str:
     if not assets:
         return "No existing assets yet (this is the first scene)."
 
-    asset_lines = []
-    for asset in assets.values():
-        asset_lines.append(f"- **{asset.name}** ({asset.type}): {asset.description}")
+    # Separate party members from other assets for clarity
+    party_assets = []
+    other_assets = []
 
-    return (
-        "EXISTING ASSETS (NPCs and objects already introduced - REUSE THESE NAMES AND DESCRIPTIONS):\n"
-        + "\n".join(asset_lines)
-    )
+    for asset_id, asset in assets.items():
+        asset_str = f"- **{asset.name}** ({asset.type}): {asset.description}"
+        if asset_id.startswith("player_"):
+            party_assets.append(asset_str)
+        else:
+            other_assets.append(asset_str)
+
+    result_parts = []
+
+    if party_assets:
+        result_parts.append(
+            "PARTY MEMBERS (your player characters - ALWAYS include in assets_present when visible):\n"
+            + "\n".join(party_assets)
+        )
+
+    if other_assets:
+        result_parts.append(
+            "OTHER EXISTING ASSETS (NPCs and objects already introduced - REUSE THESE NAMES AND DESCRIPTIONS):\n"
+            + "\n".join(other_assets)
+        )
+
+    return "\n\n".join(result_parts) if result_parts else "No existing assets yet."
 
 
 def _format_existing_locations(locations: dict[str, Location]) -> str:
@@ -1186,29 +1223,38 @@ For dialogue prompts:
 CRITICAL: For ANY dice_check prompt, you MUST set either target_character (string) or target_characters (array). Never null.
 
 CRITICAL RULES FOR CHARACTER CHANGES (SIMPLIFIED APPROACH):
-- Instead of regenerating full character sheets, report ONLY what CHANGED in THIS scene
+- The character sheets show CURRENT states as characters ENTER this scene
+- DO NOT apply previous scene's changes again! 
+- Report ONLY NEW changes that occur in THIS SPECIFIC scene
 - Use the change arrays: health_changes, inventory_changes, skill_changes, stat_changes
-- Empty arrays mean no changes of that type occurred
+- Empty arrays mean no changes of that type occurred in THIS scene
 
 HEALTH CHANGES (health_changes array):
-  * Report ONLY damage or healing that occurred in THIS scene
-  * Use negative values for damage, positive for healing
-  * CRITICAL: These are CHANGES (deltas), not absolute values
+  * Report ONLY NEW damage or healing that occurs in THIS SPECIFIC scene
+  * NEVER repeat health changes from conversation history - those are already applied
+  * Character current_health already reflects past changes - don't subtract them again
+  * Use negative values for NEW damage, positive for NEW healing
+  * CRITICAL: These are CHANGES (deltas) from what happens NOW, not what happened before
   
-  * EXAMPLES:
-    - Character takes 15 damage: {"character_name": "Theron", "health_change": -15, "reason": "goblin attack"}
-    - Character healed for 20: {"character_name": "Elara", "health_change": 20, "reason": "healing potion"}
-    - Character unaffected: Don't include them in the array
+  * CORRECT EXAMPLES:
+    - Character takes NEW 15 damage in this scene: {"character_name": "Theron", "health_change": -15, "reason": "fell from cliff"}
+    - Character gets NEW healing in this scene: {"character_name": "Elara", "health_change": 20, "reason": "healing spell"}
+    - Character unharmed in this scene: Don't include them in the array at all
   
-  * This approach eliminates confusion - you only report what happened THIS scene
-  * No need to know previous health - just report the change amount
+  * WRONG EXAMPLES (DON'T DO THIS):
+    - ❌ Applying damage from a previous scene again
+    - ❌ Using conversation history damage in this scene's health_changes
+    - ❌ Seeing "took 10 damage" in history and putting -10 in THIS scene's changes
+  
+  * Remember: Only report what happens in THIS SPECIFIC scene based on current action
 
 INVENTORY CHANGES (inventory_changes array):
-  * Report items gained or lost in THIS scene only
+  * Report items gained or lost in THIS scene only, based on what happens NOW
+  * Current inventory list shows what they have entering this scene
+  * Don't remove items that were used in previous scenes - they're already gone
   * EXAMPLES:
-    - Gained items: {"character_name": "Theron", "items_added": ["Magic Sword", "Gold Coins"], "items_removed": []}
-    - Lost items: {"character_name": "Elara", "items_added": [], "items_removed": ["Rope", "Torch"]}
-    - Used potion: {"character_name": "Gareth", "items_added": [], "items_removed": ["Health Potion"]}
+    - Gained NEW items: {"character_name": "Theron", "items_added": ["Magic Sword"], "items_removed": []}
+    - Lost/used item NOW: {"character_name": "Elara", "items_added": [], "items_removed": ["Rope"]}
     - No change: Don't include character in array
 
 SKILL CHANGES (skill_changes array):
@@ -1270,9 +1316,15 @@ CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
 CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
 - Include assets_present array listing ALL important NPCs and objects in the scene
 - Important assets are: Named NPCs, significant objects, key locations that should be visually consistent
+- CRITICAL: PARTY MEMBERS ARE ASSETS TOO:
+  * ALL party member characters are pre-registered as assets (type: "npc")
+  * When party members appear in a scene, ALWAYS include them in assets_present
+  * Use their EXACT character name from the party roster
+  * Set is_visible=true when they're present in the scene
+  * This ensures their visual consistency (reference images) across all scenes
 - For each asset, specify:
   * name: The name of the NPC or object
-  * type: "npc" for characters, "object" for items/places/things
+  * type: "npc" for characters (including party members!), "object" for items/places/things
   * description: Physical description for image generation
   * is_visible: MUST be true ONLY if the NPC/object is PHYSICALLY PRESENT in the current scene location
   * is_visible: MUST be false if the NPC/object is only mentioned, talked about, in another location, or not directly visible
@@ -1727,6 +1779,10 @@ Make the scene immersive, clear, and exciting!
         image_web_path,
         generated.game_status,
         visible_asset_ids,
+        health_changes=generated.health_changes,
+        inventory_changes=generated.inventory_changes,
+        skill_changes=generated.skill_changes,
+        stat_changes=generated.stat_changes,
     )
     scene.voiceover_path = voiceover_web_path
     scene.location_reference = processed_location_ref
@@ -1768,16 +1824,17 @@ async def generate_next_scene(
     logger.info(f"Generating scene {next_id} for: {scenario_name}")
 
     # Build detailed character information for context
+    # IMPORTANT: These are CURRENT states as they ENTER this scene, not changes to apply
     character_sheets = "\n\n".join(
         [
-            f"**{char.name}**\n"
+            f"**{char.name}** (Current State Entering Scene {next_id})\n"
             f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
-            f"- Health: {char.current_health}/{char.maximum_health}\n"
+            f"- Health: {char.current_health}/{char.maximum_health} (this is their CURRENT health, don't subtract from it again)\n"
             f"- Backstory: {char.backstory}\n"
             f"- Appearance: {char.appearance}\n"
             f"- Personality: {char.personality}\n"
             f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
-            f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'}"
+            f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'} (current items, don't remove again unless used in THIS scene)"
             for char in characters
         ]
     )
@@ -1961,6 +2018,10 @@ Continue the adventure!
         image_web_path,
         generated.game_status,
         visible_asset_ids,
+        health_changes=generated.health_changes,
+        inventory_changes=generated.inventory_changes,
+        skill_changes=generated.skill_changes,
+        stat_changes=generated.stat_changes,
     )
     scene.voiceover_path = voiceover_web_path
     scene.location_reference = processed_location_ref

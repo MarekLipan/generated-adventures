@@ -15,11 +15,11 @@ async def show_dm_notes_before_characters(
 ):
     logger.info(f"show_dm_notes_before_characters called for game {game_id}")
     main_container.clear()
-    game_state = game_flow.get_game_state(game_id)
-    if not game_state or not game_state.scenario_details:
-        logger.warning(
-            "No game state or scenario details, skipping to character selection"
-        )
+
+    # Get scenario template from game
+    scenario = game_flow.get_scenario_for_game(game_id)
+    if not scenario:
+        logger.warning("No scenario found, skipping to character selection")
         await show_characters(main_container, game_id, scenario_name)
         return
 
@@ -27,9 +27,7 @@ async def show_dm_notes_before_characters(
     with main_container:
         with ui.card().classes("fantasy-panel w-full max-w-4xl"):
             ui.label("📜 Dungeon Master's Notes").classes("text-h4 mb-6")
-            ui.markdown(game_state.scenario_details).classes(
-                "markdown w-full text-left mb-4"
-            )
+            ui.markdown(scenario.dm_notes).classes("markdown w-full text-left mb-4")
             ui.button(
                 "⚔️ Continue to Character Selection",
                 on_click=lambda: asyncio.create_task(

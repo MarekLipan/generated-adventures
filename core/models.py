@@ -1,6 +1,7 @@
 """Pydantic models for the game state."""
 
 import uuid
+from datetime import datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -94,6 +95,34 @@ class LocationReference(BaseModel):
     focus_area: Optional[str] = Field(
         None,
         description="Specific area to emphasize (e.g., 'the bar area', 'the throne', 'the entrance'). Suggestion for visual_description focus, not a strict requirement.",
+    )
+
+
+class ScenarioTemplate(BaseModel):
+    """Represents a reusable scenario template that can be played multiple times."""
+
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier for the scenario template",
+    )
+    name: str = Field(..., description="Name of the scenario")
+    one_liner: str = Field(
+        ...,
+        description="Short enticing description (1-2 sentences) to attract players without spoilers",
+    )
+    dm_notes: str = Field(
+        ...,
+        description="Full markdown DM notes including setting, plot, main quest, and important NPCs",
+    )
+    times_played: int = Field(
+        default=0, description="Number of times this scenario has been played", ge=0
+    )
+    created_at: datetime = Field(
+        default_factory=datetime.now,
+        description="Timestamp when the scenario was generated",
+    )
+    last_played_at: Optional[datetime] = Field(
+        None, description="Timestamp when the scenario was last played"
     )
 
 
@@ -214,6 +243,23 @@ class Scene(BaseModel):
         default="ongoing",
         description="Status of the game: 'ongoing', 'completed' (victory), or 'failed' (game over)",
     )
+    # Character changes that occurred in THIS scene only
+    health_changes: List["CharacterHealthChange"] = Field(
+        default_factory=list,
+        description="Health changes that occurred in this scene",
+    )
+    inventory_changes: List["CharacterInventoryChange"] = Field(
+        default_factory=list,
+        description="Inventory changes that occurred in this scene",
+    )
+    skill_changes: List["CharacterSkillChange"] = Field(
+        default_factory=list,
+        description="Skill changes that occurred in this scene",
+    )
+    stat_changes: List["CharacterStatChange"] = Field(
+        default_factory=list,
+        description="Stat changes that occurred in this scene",
+    )
 
 
 class Game(BaseModel):
@@ -221,9 +267,10 @@ class Game(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     players: int = Field(..., description="Number of players in the game", ge=1)
-    scenario_name: Optional[str] = None
+    scenario_id: Optional[str] = Field(
+        None, description="ID of the ScenarioTemplate being played"
+    )
     characters: List[Character] = []
-    scenario_details: Optional[str] = None
     scenes: List[Scene] = []
     player_actions: List[str] = []
     assets: dict[str, Asset] = Field(
@@ -236,22 +283,24 @@ class Game(BaseModel):
     )
 
 
-class GeneratedScenarios(BaseModel):
-    """Represents the list of generated scenarios."""
+class GeneratedScenarioTemplate(BaseModel):
+    """Represents AI-generated scenario template data."""
 
-    scenarios: List[str] = Field(
-        ..., description="List of three distinct fantasy adventure scenarios"
+    name: str = Field(..., description="Name of the scenario")
+    one_liner: str = Field(
+        ...,
+        description="Short enticing description (1-2 sentences) to attract players without spoilers",
     )
-
-
-class GeneratedScenarioDetails(BaseModel):
-    """Structured detailed story sections for a scenario."""
-
-    setting: str = Field(..., description="Description of the world/locale context")
-    plot: str = Field(..., description="Overall narrative arc")
-    main_quest: str = Field(..., description="Primary objective for the party")
+    setting: str = Field(
+        ..., description="Description of the world/locale context (2-4 paragraphs)"
+    )
+    plot: str = Field(..., description="Overall narrative arc (2-4 paragraphs)")
+    main_quest: str = Field(
+        ..., description="Primary objective for the party (2-4 paragraphs)"
+    )
     important_npcs: str = Field(
-        ..., description="Key NPCs with short descriptions and relevance"
+        ...,
+        description="Key NPCs with short descriptions and relevance (2-4 paragraphs)",
     )
 
 

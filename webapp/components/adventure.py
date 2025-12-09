@@ -5,6 +5,7 @@ from nicegui import ui
 from webapp.services import game_flow  # type: ignore
 from webapp.utils import show_api_error, show_loading  # type: ignore
 
+from .character_changes import render_character_changes  # type: ignore
 from .character_display import render_character_cards  # type: ignore
 
 
@@ -55,17 +56,20 @@ def render_game_completed(
     """Render the victory screen when the quest is completed."""
     main_container.clear()
 
+    # Get scenario name from template
+    scenario = game_flow.get_scenario_for_game(game_state.id)
+    scenario_name = scenario.name if scenario else "Unknown Quest"
+
     with main_container:
         # Victory banner
         with ui.card().classes(
             "fantasy-panel w-full max-w-4xl border-4 border-yellow-500 shadow-2xl"
         ):
             # Scenario title
-            if game_state and game_state.scenario_name:
-                ui.label(f"📜 {game_state.scenario_name}").classes(
-                    "text-h4 mb-2 fantasy-text-gold text-center"
-                )
-                ui.html('<div class="ornate-divider"></div>')
+            ui.label(f"📜 {scenario_name}").classes(
+                "text-h4 mb-2 fantasy-text-gold text-center"
+            )
+            ui.html('<div class="ornate-divider"></div>')
 
             # Victory title
             ui.label("🏆 QUEST COMPLETED! 🏆").classes(
@@ -128,17 +132,20 @@ def render_game_failed(
     """Render the game over screen when the party is defeated."""
     main_container.clear()
 
+    # Get scenario name from template
+    scenario = game_flow.get_scenario_for_game(game_state.id)
+    scenario_name = scenario.name if scenario else "Unknown Quest"
+
     with main_container:
         # Defeat banner
         with ui.card().classes(
             "fantasy-panel w-full max-w-4xl border-4 border-red-500 shadow-2xl"
         ):
             # Scenario title
-            if game_state and game_state.scenario_name:
-                ui.label(f"📜 {game_state.scenario_name}").classes(
-                    "text-h4 mb-2 fantasy-text-gold text-center"
-                )
-                ui.html('<div class="ornate-divider"></div>')
+            ui.label(f"📜 {scenario_name}").classes(
+                "text-h4 mb-2 fantasy-text-gold text-center"
+            )
+            ui.html('<div class="ornate-divider"></div>')
 
             # Game over title
             ui.label("💀 GAME OVER 💀").classes(
@@ -235,11 +242,12 @@ async def start_adventure(main_container, game_id: str):
         with main_container:
             with ui.card().classes("fantasy-panel w-full max-w-4xl"):
                 # Scenario title at the top
-                if game_state and game_state.scenario_name:
-                    ui.label(f"📜 {game_state.scenario_name}").classes(
-                        "text-h4 mb-2 fantasy-text-gold text-center"
-                    )
-                    ui.html('<div class="ornate-divider"></div>')
+                scenario = game_flow.get_scenario_for_game(game_id)
+                scenario_name = scenario.name if scenario else "Unknown Quest"
+                ui.label(f"📜 {scenario_name}").classes(
+                    "text-h4 mb-2 fantasy-text-gold text-center"
+                )
+                ui.html('<div class="ornate-divider"></div>')
 
                 # Scene content
                 ui.label(f"⚔️ Scene {scene.id}").classes(
@@ -266,6 +274,9 @@ async def start_adventure(main_container, game_id: str):
                 ui.image(scene.image_path).classes(
                     "w-full max-w-3xl rounded-lg shadow-lg mb-6"
                 )
+
+            # Display character changes from this scene
+            render_character_changes(scene)
 
             # Scene navigation buttons
             render_scene_navigation(game_state, scene_index, render_scene)

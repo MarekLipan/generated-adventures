@@ -37,12 +37,16 @@ async def show_characters(
                         "loading-message mt-4"
                     )
 
+            # Get scenario details from template
+            scenario = game_flow.get_scenario_for_game(game_id)
+            scenario_details = scenario.dm_notes if scenario else None
+
             logger.info("Starting character generation with scenario context...")
             all_characters: List[Character] = await game_flow.generate_characters(
                 game_id=game_id,
                 scenario_name=scenario_name,
                 num_characters=6,
-                scenario_details=game_state.scenario_details,
+                scenario_details=scenario_details,
             )  # type: ignore
             logger.info(
                 f"Character generation complete: {len(all_characters)} characters"

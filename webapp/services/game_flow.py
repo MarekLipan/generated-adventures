@@ -3,43 +3,49 @@
 Purpose:
 - Provide thin async wrappers around core.generator and core.game functions
   so UI components depend on this service instead of core modules directly.
-- Centralize environment flag checks (e.g. SHOW_DM_NOTES).
 - Offer helper accessors for game state.
 """
 
 from __future__ import annotations
 
-import os
 from typing import List, Optional
 
 from core import game, generator, persistence
-from core.models import Character, Game, Scene  # type: ignore
+from core.models import Character, Game, ScenarioTemplate, Scene  # type: ignore
 
-# --- Environment / Config helpers -------------------------------------------------
-
-
-def show_dm_notes_enabled() -> bool:
-    return os.getenv("SHOW_DM_NOTES", "0") == "1"
+# --- Scenario management ----------------------------------------------------------
 
 
-# --- Scenario generation ----------------------------------------------------------
+async def get_scenario_pool() -> List[ScenarioTemplate]:  # type: ignore
+    """Load all available scenario templates."""
+    return persistence.load_all_scenario_templates()
 
 
-async def generate_scenarios() -> List[str]:
-    """Generate new scenarios, avoiding previously played ones."""
-    # Get list of previously played scenario names
-    saved_games = persistence.list_saved_games()
-    previously_played = [
-        scenario_name
-        for _, scenario_name, _ in saved_games
-        if scenario_name != "Unknown Scenario"
-    ]
+async def generate_new_scenario() -> ScenarioTemplate:  # type: ignore
+    """Generate a new scenario template with contrastive prompting.
 
-    return await generator.generate_scenarios(previously_played=previously_played)
+    Returns the newly created ScenarioTemplate.
+    """
+    # Load all existing scenarios for contrast
+    existing_scenarios = persistence.load_all_scenario_templates()
+
+    # Generate new scenario
+    new_scenario = await generator.generate_scenario_template(existing_scenarios)
+
+    # Save it
+    persistence.save_scenario_template(new_scenario)
+
+    return new_scenario
 
 
-async def generate_and_set_details(game_id: str) -> None:
-    await game.generate_and_set_scenario_details(game_id)
+def select_scenario(game_id: str, scenario_id: str) -> None:
+    """Select a scenario template for the game."""
+    game.select_scenario_for_game(game_id, scenario_id)
+
+
+def get_scenario_for_game(game_id: str) -> Optional[ScenarioTemplate]:  # type: ignore
+    """Get the scenario template for a game."""
+    return game.get_scenario_from_game(game_id)
 
 
 async def generate_opening_scene(game_id: str) -> None:
@@ -55,10 +61,6 @@ def create_new_game(players: int) -> str:
 
 def get_game_state(game_id: str) -> Optional[Game]:  # type: ignore
     return game.get_game_state(game_id)
-
-
-def select_scenario(game_id: str, scenario_name: str) -> None:
-    game.select_scenario_for_game(game_id, scenario_name)
 
 
 # --- Characters ------------------------------------------------------------------

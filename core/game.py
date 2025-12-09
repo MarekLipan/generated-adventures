@@ -6,10 +6,11 @@ It manages an in-memory mapping of games and exposes helpers to advance the
 scene-based story by calling the generator.
 """
 
+from datetime import datetime
 from typing import Optional
 
 from . import generator, persistence
-from .models import Character, Game, Scene
+from .models import Asset, Character, Game, ScenarioTemplate, Scene
 
 # In-memory storage for active games, mapping game_id to a Game object.
 games: dict[str, Game] = {}
@@ -31,10 +32,22 @@ def load_game(game_id: str) -> Optional[Game]:
     return game
 
 
-def select_scenario_for_game(game_id: str, scenario_name: str):
-    """Updates the game state with the selected scenario."""
+def select_scenario_for_game(game_id: str, scenario_id: str):
+    """Updates the game state with the selected scenario template.
+
+    Args:
+        game_id: ID of the game
+        scenario_id: ID of the ScenarioTemplate to use
+    """
     if game_id in games:
-        games[game_id].scenario_name = scenario_name
+        # Load the scenario template to update its play count
+        scenario = persistence.load_scenario_template(scenario_id)
+        if scenario:
+            scenario.times_played += 1
+            scenario.last_played_at = datetime.now()
+            persistence.save_scenario_template(scenario)
+
+        games[game_id].scenario_id = scenario_id
         persistence.save_game(games[game_id])
 
 
@@ -45,20 +58,31 @@ def add_character_to_game(game_id: str, character: Character):
         persistence.save_game(games[game_id])
 
 
-async def generate_and_set_scenario_details(game_id: str):
-    """Generates the scenario notes (DM) only.
+def convert_party_characters_to_assets(game_id: str):
+    """Converts all party characters into assets for visual consistency.
 
-    This will populate `game.scenario_details` with the background information
-    for the Dungeon Master. The opening scene should be generated separately
-    after the party is selected.
+    This ensures that player characters are treated as assets with reference images
+    in scene generation, maintaining visual consistency throughout the adventure.
+    Should be called once after the party is finalized and before the first scene.
     """
     game = games.get(game_id)
-    if not game or not game.scenario_name:
+    if not game:
         return
 
-    # Generate the main story details for the DM
-    details = await generator.generate_scenario_details(game.scenario_name)
-    game.scenario_details = details
+    for character in game.characters:
+        # Create an asset for each player character if not already present
+        # Use a deterministic ID based on character name to avoid duplicates
+        asset_id = f"player_{character.name.lower().replace(' ', '_')}"
+
+        if asset_id not in game.assets:
+            asset = Asset(
+                id=asset_id,
+                name=character.name,
+                type="npc",
+                description=character.appearance,
+                image_path=character.image_path,
+            )
+            game.assets[asset_id] = asset
 
     persistence.save_game(game)
 
@@ -71,14 +95,22 @@ async def generate_opening_scene(game_id: str):
     states if needed.
     """
     game = games.get(game_id)
-    if not game or not game.scenario_name or not game.characters:
+    if not game or not game.scenario_id or not game.characters:
         return
+
+    # Load scenario template to get details
+    scenario = persistence.load_scenario_template(game.scenario_id)
+    if not scenario:
+        return
+
+    # Convert party characters to assets for visual consistency
+    convert_party_characters_to_assets(game_id)
 
     # Generate initial locations for the adventure if not already done
     if not game.locations:
         game.locations = await generator.generate_initial_locations(
-            game.scenario_name,
-            game.scenario_details,
+            scenario.name,
+            scenario.dm_notes,
         )
 
     # Generate the very first scene for the players (and get updated character states, assets, and locations)
@@ -89,8 +121,8 @@ async def generate_opening_scene(game_id: str):
         updated_locations,
     ) = await generator.generate_opening_scene(
         game_id,
-        game.scenario_name,
-        game.scenario_details or "",
+        scenario.name,
+        scenario.dm_notes,
         game.characters,
         game.assets,
         game.locations,
@@ -106,6 +138,14 @@ async def generate_opening_scene(game_id: str):
 def get_game_state(game_id: str) -> Optional[Game]:
     """Retrieves the current state of a game as a Pydantic object."""
     return games.get(game_id)
+
+
+def get_scenario_from_game(game_id: str) -> Optional[ScenarioTemplate]:
+    """Retrieves the scenario template for a game."""
+    game = get_game_state(game_id)
+    if not game or not game.scenario_id:
+        return None
+    return persistence.load_scenario_template(game.scenario_id)
 
 
 def get_current_scene(game_id: str) -> Optional[Scene]:
@@ -147,6 +187,11 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
             }
         )
 
+    # Get scenario details from template
+    scenario = get_scenario_from_game(game_id)
+    if not scenario:
+        return None
+
     (
         next_scene,
         updated_characters,
@@ -154,8 +199,8 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         updated_locations,
     ) = await generator.generate_next_scene(
         game_id=game_id,
-        scenario_name=game_state.scenario_name or "",
-        scenario_details=game_state.scenario_details or "",
+        scenario_name=scenario.name,
+        scenario_details=scenario.dm_notes,
         characters=game_state.characters,
         last_scene_id=last_id,
         player_action=player_action,
