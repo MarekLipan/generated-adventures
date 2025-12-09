@@ -7,6 +7,7 @@ from webapp.utils import show_api_error, show_loading  # type: ignore
 
 from .character_changes import render_character_changes  # type: ignore
 from .character_display import render_character_cards  # type: ignore
+from .recap import show_recap_dialog  # type: ignore
 
 
 def render_scene_navigation(game_state, scene_index, render_scene_callback):
@@ -27,15 +28,20 @@ def render_scene_navigation(game_state, scene_index, render_scene_callback):
                     on_click=lambda idx=scene_index - 1: render_scene_callback(
                         game_state.scenes[idx], idx
                     ),
-                ).classes("fantasy-button")
+                )
             else:
                 # Invisible placeholder to maintain spacing
                 ui.label("").classes("w-32")
 
-            # Scene indicator
-            ui.label(f"Scene {scene_index + 1} of {len(game_state.scenes)}").classes(
-                "text-center fantasy-text-gold"
-            )
+            # Center column: Scene indicator and Recap button
+            with ui.column().classes("items-center gap-2"):
+                ui.label(f"Scene {scene_index + 1} of {len(game_state.scenes)}").classes(
+                    "text-center fantasy-text-gold"
+                )
+                ui.button(
+                    "📖 Recap",
+                    on_click=lambda: show_recap_dialog(game_state, scene_index),
+                ).classes("text-sm")
 
             # Next scene button (if not on the last scene)
             if scene_index < len(game_state.scenes) - 1:
@@ -44,7 +50,7 @@ def render_scene_navigation(game_state, scene_index, render_scene_callback):
                     on_click=lambda idx=scene_index + 1: render_scene_callback(
                         game_state.scenes[idx], idx
                     ),
-                ).classes("fantasy-button")
+                )
             else:
                 # Invisible placeholder to maintain spacing
                 ui.label("").classes("w-32")

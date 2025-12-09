@@ -260,6 +260,10 @@ class Scene(BaseModel):
         default_factory=list,
         description="Stat changes that occurred in this scene",
     )
+    recap_text: Optional[str] = Field(
+        None,
+        description="Cached AI-generated recap of all scenes up to and including this one",
+    )
 
 
 class Game(BaseModel):

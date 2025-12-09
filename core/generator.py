@@ -2026,3 +2026,92 @@ Continue the adventure!
     scene.voiceover_path = voiceover_web_path
     scene.location_reference = processed_location_ref
     return scene, updated_characters, updated_assets, updated_locations
+
+
+async def generate_scene_recap(
+    game_id: str,
+    scenario_name: str,
+    scenes: List[Scene],
+    characters: List[Character],
+    current_scene_index: int,
+) -> str:
+    """Generate a narrative recap of all scenes up to the current point.
+
+    Args:
+        game_id: Unique identifier for the game
+        scenario_name: Name of the scenario being played
+        scenes: List of all scenes in the game
+        characters: Current party characters
+        current_scene_index: Index of the current scene (0-based)
+
+    Returns:
+        Narrative recap text in markdown format
+    """
+    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)
+
+    logger.info(
+        f"Generating recap for game {game_id}, scenes 1-{current_scene_index + 1}"
+    )
+
+    # Build scene summaries for context
+    scene_summaries = []
+    for i, scene in enumerate(scenes[: current_scene_index + 1]):
+        summary = f"**Scene {scene.id}:**\n{scene.text[:500]}..."
+        if scene.prompt:
+            summary += f"\n*Player choice was needed here*"
+        scene_summaries.append(summary)
+
+    scenes_context = "\n\n".join(scene_summaries)
+
+    # Build character status
+    character_status = "\n".join(
+        [
+            f"- **{char.name}**: HP {char.current_health}/{char.maximum_health}, "
+            f"Skills: {', '.join(char.skills[:3]) if char.skills else 'None'}"
+            for char in characters
+        ]
+    )
+
+    prompt = f"""You are a skilled storyteller creating a recap for players returning to their adventure after a break.
+
+SCENARIO: {scenario_name}
+
+CURRENT PARTY STATUS:
+{character_status}
+
+SCENES SO FAR:
+{scenes_context}
+
+Create an engaging, concise recap (200-300 words) that:
+1. Reminds players of the adventure's main goal
+2. Summarizes the key events that have happened so far
+3. Highlights any important choices the party made
+4. Notes any significant character developments (injuries, items gained, etc.)
+5. Sets the stage for where the story is now
+6. Uses an exciting, narrative tone as if read by a Dungeon Master
+
+Write in past tense, as if narrating a story. Make it feel like "Previously on [Adventure Name]..."
+"""
+
+    try:
+        response = await retry_on_overload(
+            client.aio.models.generate_content,
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        recap_text = response.text.strip()
+        logger.info(f"Successfully generated recap ({len(recap_text)} chars)")
+        return recap_text
+    except Exception as e:
+        logger.error(f"Failed to generate recap: {e}")
+        # Return a simple fallback recap
+        return f"""## Previously in {scenario_name}...
+
+Your party has journeyed through {current_scene_index + 1} scene(s) of adventure. 
+The story continues with your brave heroes facing new challenges.
+
+Current party status:
+{character_status}
+"""
