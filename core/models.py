@@ -463,6 +463,32 @@ class AssetReference(BaseModel):
     )
 
 
+class SceneSummary(BaseModel):
+    """One-sentence summary of what happened in a specific scene."""
+
+    scene_id: int = Field(
+        ...,
+        description="The scene ID this summary corresponds to",
+    )
+    summary: str = Field(
+        ...,
+        description="A concise one-sentence summary (15-20 words) of the key event or development in this scene. Focus on the main action, discovery, or decision.",
+    )
+
+
+class RecapResponse(BaseModel):
+    """Response containing both overall recap narrative and individual scene summaries."""
+
+    recap_text: str = Field(
+        ...,
+        description="The overall narrative recap (200-300 words) summarizing the adventure so far in an engaging, DM-style narration.",
+    )
+    scene_summaries: List[SceneSummary] = Field(
+        ...,
+        description="One-sentence summaries for each scene, in order. Use concise, punchy language that captures the essence of each scene.",
+    )
+
+
 class GeneratedScene(BaseModel):
     """Represents a generated scene with narrative and player prompt."""
 

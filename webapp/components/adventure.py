@@ -35,9 +35,9 @@ def render_scene_navigation(game_state, scene_index, render_scene_callback):
 
             # Center column: Scene indicator and Recap button
             with ui.column().classes("items-center gap-2"):
-                ui.label(f"Scene {scene_index + 1} of {len(game_state.scenes)}").classes(
-                    "text-center fantasy-text-gold"
-                )
+                ui.label(
+                    f"Scene {scene_index + 1} of {len(game_state.scenes)}"
+                ).classes("text-center fantasy-text-gold")
                 ui.button(
                     "📖 Recap",
                     on_click=lambda: show_recap_dialog(game_state, scene_index),

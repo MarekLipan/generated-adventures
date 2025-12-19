@@ -31,8 +31,10 @@ from .models import (
     GeneratedScene,
     Location,
     LocationReference,
+    RecapResponse,
     ScenarioTemplate,
     Scene,
+    SceneSummary,
 )
 
 logger = logging.getLogger()  # Use root logger so Uvicorn/NiceGUI picks up logs
@@ -458,7 +460,7 @@ async def generate_characters(
 
     logger.info(f"Generating {num_characters} characters for scenario: {scenario_name}")
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
     agent = Agent(model=model, output_type=GeneratedCharacterList)
 
     # Build context-aware prompt
@@ -567,7 +569,7 @@ async def generate_scenario_template(
         ScenarioTemplate object with name, one_liner, and full DM notes
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
     agent = Agent(model=model, output_type=GeneratedScenarioTemplate)
 
     logger.info(
@@ -686,7 +688,7 @@ async def generate_initial_locations(
         Dictionary mapping location IDs to Location objects
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
     agent = Agent(model=model, output_type=GeneratedLocationList)
 
     logger.info(f"Generating initial locations for scenario: {scenario_name}")
@@ -1614,7 +1616,7 @@ async def generate_opening_scene(
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
     agent = Agent(model=model, output_type=GeneratedScene)
 
     logger.info(f"Generating opening scene for: {scenario_name}")
@@ -1817,7 +1819,7 @@ async def generate_next_scene(
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-pro", provider=provider)
+    model = GoogleModel("gemini-2.5-flash", provider=provider)
     agent = Agent(model=model, output_type=GeneratedScene)
 
     next_id = last_scene_id + 1
@@ -2034,8 +2036,8 @@ async def generate_scene_recap(
     scenes: List[Scene],
     characters: List[Character],
     current_scene_index: int,
-) -> str:
-    """Generate a narrative recap of all scenes up to the current point.
+) -> RecapResponse:
+    """Generate a narrative recap with per-scene summaries.
 
     Args:
         game_id: Unique identifier for the game
@@ -2045,11 +2047,11 @@ async def generate_scene_recap(
         current_scene_index: Index of the current scene (0-based)
 
     Returns:
-        Narrative recap text in markdown format
+        RecapResponse containing overall recap text and individual scene summaries
     """
     provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
     model = GoogleModel("gemini-2.5-flash", provider=provider)
-    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)
+    agent = Agent(model=model, output_type=RecapResponse)
 
     logger.info(
         f"Generating recap for game {game_id}, scenes 1-{current_scene_index + 1}"
@@ -2084,34 +2086,59 @@ CURRENT PARTY STATUS:
 SCENES SO FAR:
 {scenes_context}
 
-Create an engaging, concise recap (200-300 words) that:
-1. Reminds players of the adventure's main goal
-2. Summarizes the key events that have happened so far
-3. Highlights any important choices the party made
-4. Notes any significant character developments (injuries, items gained, etc.)
-5. Sets the stage for where the story is now
-6. Uses an exciting, narrative tone as if read by a Dungeon Master
+Generate TWO things:
 
-Write in past tense, as if narrating a story. Make it feel like "Previously on [Adventure Name]..."
+1. **recap_text**: An engaging, concise overall recap (200-300 words) that:
+   - Reminds players of the adventure's main goal
+   - Summarizes the key events that have happened so far
+   - Highlights any important choices the party made
+   - Notes any significant character developments (injuries, items gained, etc.)
+   - Sets the stage for where the story is now
+   - Uses an exciting, narrative tone as if read by a Dungeon Master
+   - Written in past tense, like "Previously on [Adventure Name]..."
+
+2. **scene_summaries**: For EACH scene (scenes 1-{current_scene_index + 1}), provide:
+   - scene_id: The scene number
+   - summary: A concise one-sentence summary (15-20 words) capturing the key event/development
+   
+   Make each scene summary punchy and informative. Focus on:
+   - What significant thing happened (discovery, combat, decision, meeting)
+   - Who was involved (specific characters if relevant)
+   - The immediate consequence or outcome
+   
+   Examples of good scene summaries:
+   - "The party discovered an ancient temple hidden in the misty mountains."
+   - "Theron negotiated with the bandit chief, securing safe passage through the forest."
+   - "A fierce battle with goblins left the party wounded but victorious."
+   - "The mysterious wizard revealed the location of the legendary artifact."
+
+Return your response in the RecapResponse format with both recap_text and scene_summaries array.
 """
 
     try:
-        response = await retry_on_overload(
-            client.aio.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=prompt,
+        result = await retry_on_overload(agent.run, prompt)
+        recap_response = result.output
+        logger.info(
+            f"Successfully generated recap ({len(recap_response.recap_text)} chars, {len(recap_response.scene_summaries)} scene summaries)"
         )
-        recap_text = response.text.strip()
-        logger.info(f"Successfully generated recap ({len(recap_text)} chars)")
-        return recap_text
+        return recap_response
     except Exception as e:
         logger.error(f"Failed to generate recap: {e}")
         # Return a simple fallback recap
-        return f"""## Previously in {scenario_name}...
+        fallback_summaries = [
+            SceneSummary(
+                scene_id=scene.id, summary=f"Scene {scene.id}: Adventure continues..."
+            )
+            for scene in scenes[: current_scene_index + 1]
+        ]
+        return RecapResponse(
+            recap_text=f"""## Previously in {scenario_name}...
 
 Your party has journeyed through {current_scene_index + 1} scene(s) of adventure. 
 The story continues with your brave heroes facing new challenges.
 
 Current party status:
 {character_status}
-"""
+""",
+            scene_summaries=fallback_summaries,
+        )
