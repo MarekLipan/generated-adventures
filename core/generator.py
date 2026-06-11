@@ -21,6 +21,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 from .config import settings
+from .image_backends import ImageGenerator, get_image_generator
 from .models import (
     Asset,
     Character,
@@ -51,6 +52,18 @@ IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 SCENE_IMAGE_DIR = pathlib.Path("webapp/static/scenes")
 SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Lazy initialization of image generator to avoid loading models at import
+_image_generator: Optional[ImageGenerator] = None
+
+
+def _get_image_generator() -> ImageGenerator:
+    """Get or initialize the image generator singleton."""
+    global _image_generator
+    if _image_generator is None:
+        _image_generator = get_image_generator()
+    return _image_generator
+
 
 VOICEOVER_DIR = pathlib.Path("webapp/static/voiceovers")
 VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
@@ -112,7 +125,7 @@ async def retry_on_overload(func: Callable, *args, **kwargs) -> any:
 
 
 def _generate_character_image_sync(
-    client,
+    generator: ImageGenerator,
     concept,
     scenario_name: str,
     game_id: str,
@@ -153,44 +166,28 @@ def _generate_character_image_sync(
     )
 
     prompt_img = " ".join(prompt_parts)
-    image_file_path = None
     logger.info(f"Generating image for character: {concept.name}")
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-image-preview",
-            contents=[prompt_img],
-        )
-    except (RuntimeError, ValueError, OSError):  # request-level failure
-        response = None
-        logger.warning(f"Image generation request failed for {concept.name}")
 
-    if response is not None:
-        # Iterate parts, save first inline image
-        try:
-            for part in response.candidates[0].content.parts:  # type: ignore[index]
-                if getattr(part, "inline_data", None) and getattr(
-                    part.inline_data, "data", None
-                ):
-                    img = Image.open(BytesIO(part.inline_data.data))
-                    safe_name = (
-                        "".join(c for c in concept.name if c.isalnum() or c in " _-")
-                        .rstrip()
-                        .replace(" ", "_")
-                    )
-                    filename = f"{idx:02d}_{safe_name or 'character'}.png"
-                    image_file_path = game_dir / filename
-                    img.save(image_file_path)
-                    logger.info(f"Saved image for {concept.name} at {image_file_path}")
-                    break
-        except (OSError, ValueError):  # image decode/save issues
-            image_file_path = None
-            logger.warning(f"Failed to decode/save image for {concept.name}")
+    # Prepare output path
+    safe_name = (
+        "".join(c for c in concept.name if c.isalnum() or c in " _-")
+        .rstrip()
+        .replace(" ", "_")
+    )
+    filename = f"{idx:02d}_{safe_name or 'character'}.png"
+    output_path = game_dir / filename
+
+    # Generate using backend
+    image_file_path = generator.generate_character_image(
+        prompt=prompt_img,
+        output_path=output_path,
+    )
 
     return concept.name, image_file_path
 
 
 def _generate_scene_image_sync(
-    client,
+    generator: ImageGenerator,
     game_id: str,
     scene_id: int,
     scene_text: str,
@@ -204,7 +201,7 @@ def _generate_scene_image_sync(
     """Synchronous helper to generate a scene image.
 
     Args:
-        client: Google GenAI client
+        generator: ImageGenerator backend instance
         game_id: Game identifier for directory structure
         scene_id: Scene number
         scene_text: The narrative text of the scene
@@ -218,8 +215,6 @@ def _generate_scene_image_sync(
     Returns:
         Path to saved scene image or None if generation failed
     """
-    from google.genai import types as genai_types  # type: ignore
-
     # Create scene directory for this game
     scene_dir = SCENE_IMAGE_DIR / game_id
     scene_dir.mkdir(parents=True, exist_ok=True)
@@ -264,13 +259,8 @@ def _generate_scene_image_sync(
 
     prompt_text = "\n".join(prompt_parts)
 
-    # Prepare content with text prompt and reference images
-    content_parts = [prompt_text]
-
-    # Add asset images as reference (if they exist and are visible in this scene)
-    # NOTE: Party characters are now also in the assets system (converted before first scene)
-    # so this loop handles BOTH party members AND other NPCs/objects with one unified approach
-    asset_count = 0
+    # Collect reference images for character/asset consistency
+    reference_images: List[pathlib.Path] = []
     if assets and visible_asset_ids:
         for asset_id in visible_asset_ids:
             asset = assets.get(asset_id)
@@ -278,78 +268,27 @@ def _generate_scene_image_sync(
                 # Convert web path to file path
                 asset_image_file = pathlib.Path("webapp") / asset.image_path.lstrip("/")
                 if asset_image_file.exists():
-                    try:
-                        # Add text label before the image
-                        content_parts.append(
-                            f"\n📸 {asset.type.upper()} REFERENCE - {asset.name.upper()}:"
-                        )
-                        content_parts.append(
-                            f"This is {asset.name}. Use THIS appearance in the scene."
-                        )
-
-                        with open(asset_image_file, "rb") as f:
-                            image_data = f.read()
-                        content_parts.append(
-                            genai_types.Part.from_bytes(
-                                data=image_data, mime_type="image/png"
-                            )
-                        )
-                        asset_count += 1
-                        logger.info(
-                            f"✓ Added reference image for asset: {asset.name} ({asset.type})"
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not load asset image for {asset.name}: {e}"
-                        )
-
-    if asset_count > 0:
-        content_parts.append(
-            f"\n✅ {asset_count} reference image(s) provided above (party members + other assets). USE THEM for visual consistency."
-        )
+                    reference_images.append(asset_image_file)
+                    logger.info(
+                        f"✓ Added reference image for asset: {asset.name} ({asset.type})"
+                    )
 
     logger.info(
-        f"Generating scene image for scene {scene_id} with {asset_count} total reference images (party + assets)"
+        f"Generating scene image for scene {scene_id} with {len(reference_images)} reference images"
     )
 
-    try:
-        from google.genai import types as genai_config  # type: ignore
+    # Prepare output path
+    filename = f"scene_{scene_id:03d}.png"
+    output_path = scene_dir / filename
 
-        # Try to configure landscape aspect ratio
-        config = genai_config.GenerateContentConfig(
-            response_modalities=["image"],
-        )
+    # Generate using backend (only Gemini supports reference images)
+    image_file_path = generator.generate_scene_image(
+        prompt=prompt_text,
+        output_path=output_path,
+        reference_images=reference_images if reference_images else None,
+    )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-image-preview",
-            contents=content_parts,
-            config=config,
-        )
-    except (RuntimeError, ValueError, OSError) as e:
-        logger.warning(
-            f"Scene image generation request failed for scene {scene_id}: {e}"
-        )
-        return None
-
-    if response is not None:
-        try:
-            for part in response.candidates[0].content.parts:  # type: ignore[index]
-                if getattr(part, "inline_data", None) and getattr(
-                    part.inline_data, "data", None
-                ):
-                    img = Image.open(BytesIO(part.inline_data.data))
-                    filename = f"scene_{scene_id:03d}.png"
-                    image_file_path = scene_dir / filename
-                    img.save(image_file_path)
-                    logger.info(f"Saved scene image at {image_file_path}")
-                    return image_file_path
-        except (OSError, ValueError) as e:
-            logger.warning(
-                f"Failed to decode/save scene image for scene {scene_id}: {e}"
-            )
-            return None
-
-    return None
+    return image_file_path
 
 
 def _generate_scene_voiceover_sync(
@@ -496,12 +435,12 @@ Skills should match the character's background, stats, and archetype.
     logger.info(f"=== {num_characters} Characters Generated ===")
     logger.info(f"Characters: {concept_result.output.model_dump_json(indent=2)}")
 
-    # Step 2: Synchronous image generation using working google.genai client
+    # Step 2: Synchronous image generation using backend abstraction
     # Create game-specific directory for character images
     game_dir = IMAGE_DIR / game_id
     game_dir.mkdir(parents=True, exist_ok=True)
 
-    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
+    generator = _get_image_generator()
 
     # Step 3: Generate images asynchronously (in thread pool to avoid blocking event loop)
     final_characters: List[Character] = []
@@ -510,7 +449,7 @@ Skills should match the character's background, stats, and archetype.
     image_tasks = [
         asyncio.to_thread(
             _generate_character_image_sync,
-            client,
+            generator,
             concept,
             scenario_name,
             game_id,
@@ -1728,11 +1667,14 @@ Make the scene immersive, clear, and exciting!
         updated_assets = existing_assets
         visible_asset_ids = []
 
+    # Get image generator backend
+    generator = _get_image_generator()
+
     # Generate scene image and voiceover in background threads (concurrently)
     # Now we can include asset images in scene generation
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
-        client,
+        generator,
         game_id,
         scene_id,
         generated.scene_text,
@@ -1967,11 +1909,14 @@ Continue the adventure!
         updated_assets = existing_assets
         visible_asset_ids = []
 
+    # Get image generator backend
+    generator = _get_image_generator()
+
     # Generate scene image and voiceover in background threads (concurrently)
     # Now we can include asset images in scene generation
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
-        client,
+        generator,
         game_id,
         next_id,
         generated.scene_text,
