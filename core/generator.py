@@ -219,45 +219,18 @@ def _generate_scene_image_sync(
     scene_dir = SCENE_IMAGE_DIR / game_id
     scene_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build prompt with scene context and visual description
-    prompt_parts = [
-        "🎯 CRITICAL PRIORITY #1 - CHARACTER & ASSET VISUAL CONSISTENCY:",
-        "- REFERENCE IMAGES ARE PROVIDED BELOW FOR ALL VISIBLE CHARACTERS AND ASSETS - YOU MUST USE THEM",
-        "- Every character (party members + NPCs) MUST look EXACTLY like their reference image",
-        "- Every object/NPC MUST match their reference image exactly",
-        "- This is THE MOST IMPORTANT requirement - consistency of appearance across all scenes",
-        "- Match: facial features, hairstyle, hair color, clothing style, clothing colors, equipment, accessories",
-        "- If a character/asset appears, they MUST be instantly recognizable from their reference image",
-        "",
-        "📐 FORMAT REQUIREMENT:",
-        "- Generate in LANDSCAPE/HORIZONTAL orientation (16:9 aspect ratio, width > height)",
-        "",
-        "🎨 SCENE COMPOSITION:",
-        f"{visual_description}",
-        "",
-        "📖 NARRATIVE CONTEXT:",
-        f"{scene_text[:500]}..."
-        if len(scene_text) > 500
-        else scene_text,  # Limit context to reduce complexity
-        "",
-        "✅ ADDITIONAL GUIDELINES:",
-        "- Only include characters/objects mentioned in the visual description",
-        "- Natural poses and angles matching the composition (not just frontal portraits)",
-        "- Painterly fantasy art style, cinematic, dramatic lighting",
-        f"- Environment: {scenario_name} fantasy setting",
-    ]
-
-    # Add special instructions for ending scenes
+    # Build a concise visual prompt from the authoritative visual_description.
+    # The structured Gemini-style headers that were here before were ignored by
+    # FLUX (CLIP truncated them before reaching the actual scene content) and
+    # added no value to Gemini either. Both backends work better with a clean
+    # visual description they can actually encode.
+    mood = ""
     if game_status == "completed":
-        prompt_parts.append("")
-        prompt_parts.append(
-            "🏆 VICTORY SCENE: Triumphant conclusion with uplifting atmosphere"
-        )
+        mood = " Triumphant, uplifting atmosphere."
     elif game_status == "failed":
-        prompt_parts.append("")
-        prompt_parts.append("💀 DEFEAT SCENE: Dramatic defeat with somber atmosphere")
+        mood = " Somber, dramatic defeat atmosphere."
 
-    prompt_text = "\n".join(prompt_parts)
+    prompt_text = f"{visual_description} {scenario_name} fantasy setting.{mood}"
 
     # Collect reference images for character/asset consistency
     reference_images: List[pathlib.Path] = []

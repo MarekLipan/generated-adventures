@@ -30,6 +30,21 @@ class Settings(BaseSettings):
     # Device configuration (auto, cuda, mps, cpu)
     IMAGE_DEVICE: str = "auto"  # auto will choose mps for Mac, cuda for NVIDIA
 
+    # GGUF pre-quantized models (recommended over runtime quantization).
+    # Format: "repo_id:filename" — files are resolved from the HuggingFace cache.
+    # When both are set, GGUF loading is used and IMAGE_QUANTIZATION is ignored.
+    # Transformer Q8_0 (~12.7 GB) + T5 Q5_K_M (~3.4 GB) = ~20 GB total,
+    # fits in 32 GB unified memory with no CPU offload.
+    FLUX_KONTEXT_GGUF_TRANSFORMER: str = ""
+    FLUX_KONTEXT_GGUF_T5: str = ""
+
+    # Runtime quantization via optimum-quanto (fallback when GGUF is not set).
+    # - "none":  bfloat16 full precision (~24 GB) — requires sequential CPU offload on 32 GB Mac
+    # - "int8":  8-bit weights (~12 GB)  — fits in 32 GB without any CPU offload
+    # - "int4":  4-bit weights (~6 GB)   — fits easily, some quality loss
+    # Requires: pip install optimum-quanto
+    IMAGE_QUANTIZATION: Literal["none", "int8", "int4"] = "none"
+
     # Generation parameters
     IMAGE_NUM_INFERENCE_STEPS: int = 30  # Lower = faster, higher = better quality
 

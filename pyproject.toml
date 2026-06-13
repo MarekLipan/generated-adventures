@@ -27,6 +27,8 @@ local-image = [
     "safetensors>=0.4.0",
     "sentencepiece>=0.2.0",
     "protobuf>=4.0.0",
+    "optimum-quanto>=0.2.0",
+    "gguf>=0.10.0",
 ]
 
 [tool.setuptools]

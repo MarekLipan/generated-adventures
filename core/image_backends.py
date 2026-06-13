@@ -176,27 +176,68 @@ class FluxKontextImageGenerator(ImageGenerator):
             if self.device == "cpu":
                 self.torch_dtype = torch.float32
             elif self.device == "mps":
-                self.torch_dtype = torch.float16
+                self.torch_dtype = torch.bfloat16
             else:
                 self.torch_dtype = torch.bfloat16
 
-            self.pipe = FluxKontextPipeline.from_pretrained(
-                settings.FLUX_KONTEXT_MODEL,
-                torch_dtype=self.torch_dtype,
+            use_gguf = bool(
+                settings.FLUX_KONTEXT_GGUF_TRANSFORMER
+                and settings.FLUX_KONTEXT_GGUF_T5
             )
+
+            if use_gguf:
+                self.pipe = self._load_gguf_pipeline(FluxKontextPipeline)
+            else:
+                self.pipe = FluxKontextPipeline.from_pretrained(
+                    settings.FLUX_KONTEXT_MODEL,
+                    torch_dtype=self.torch_dtype,
+                )
+
+                # Runtime quantization via optimum-quanto (fallback when GGUF not set).
+                if settings.IMAGE_QUANTIZATION != "none":
+                    try:
+                        from optimum.quanto import freeze, qint4, qint8, quantize
+
+                        weight_dtype = (
+                            qint8 if settings.IMAGE_QUANTIZATION == "int8" else qint4
+                        )
+                        logger.info(
+                            f"Quantizing transformer to {settings.IMAGE_QUANTIZATION}..."
+                        )
+                        quantize(self.pipe.transformer, weights=weight_dtype)
+                        freeze(self.pipe.transformer)
+                        logger.info(
+                            f"✓ Transformer quantized to {settings.IMAGE_QUANTIZATION}"
+                        )
+                    except ImportError:
+                        logger.warning(
+                            "optimum-quanto not installed — skipping quantization. "
+                            "Run: pip install optimum-quanto"
+                        )
 
             self.cpu_offload_enabled = False
 
             # Memory management.
             #
-            # On Apple Silicon (MPS) the 12B transformer (~24 GB in fp16) plus
-            # the T5/CLIP text encoders (~12 GB) cannot all stay resident within
-            # the unified-memory budget, and model-level offload does not
-            # reliably evict the encoders. Sequential CPU offload keeps only one
-            # submodule on the accelerator at a time, giving the lowest possible
-            # peak memory (slower, but it fits). On CUDA, the faster model-level
-            # offload is sufficient.
-            if settings.IMAGE_ENABLE_CPU_OFFLOAD and self.device != "cpu":
+            # GGUF (Q8_0 transformer ~12.7 GB + Q5_K_M T5 ~3.4 GB = ~20 GB total)
+            # fits in 32 GB on paper, but the attention tensors during the reference
+            # scene path (doubled sequence length) push peak MPS usage over the
+            # watermark with T5 still resident. Model-level CPU offload solves this:
+            # T5 moves to CPU after text encoding, so peak MPS during the 15
+            # denoising steps = transformer only (~12.7 GB) + ~3 GB attention = ~16 GB.
+            #
+            # Full bfloat16 (~34 GB) exceeds 32 GB and requires sequential CPU
+            # offload, which pages one layer at a time and is very slow.
+            quantized = use_gguf or settings.IMAGE_QUANTIZATION != "none"
+
+            if quantized and self.device == "mps":
+                self.pipe.enable_model_cpu_offload(device=self.device)
+                self.cpu_offload_enabled = True
+                logger.info(
+                    "✓ GGUF on MPS: model-level CPU offload enabled "
+                    "(T5 moves to CPU after encoding, transformer stays on MPS)"
+                )
+            elif settings.IMAGE_ENABLE_CPU_OFFLOAD and self.device != "cpu":
                 try:
                     if self.device == "mps":
                         self.pipe.enable_sequential_cpu_offload(device=self.device)
@@ -244,6 +285,51 @@ class FluxKontextImageGenerator(ImageGenerator):
                 "safetensors sentencepiece protobuf\n"
                 f"Error: {e}"
             )
+
+    def _load_gguf_pipeline(self, pipeline_cls):
+        """Load pipeline using pre-quantized GGUF files for transformer and T5."""
+        import torch
+        from diffusers import FluxTransformer2DModel
+        from diffusers.quantizers.quantization_config import GGUFQuantizationConfig
+        from huggingface_hub import hf_hub_download
+        from transformers import T5EncoderModel
+
+        t_repo, t_file = settings.FLUX_KONTEXT_GGUF_TRANSFORMER.split(":", 1)
+        e_repo, e_file = settings.FLUX_KONTEXT_GGUF_T5.split(":", 1)
+
+        logger.info(f"Loading GGUF transformer: {t_file} from {t_repo}")
+        transformer_path = hf_hub_download(repo_id=t_repo, filename=t_file)
+        transformer = FluxTransformer2DModel.from_single_file(
+            transformer_path,
+            quantization_config=GGUFQuantizationConfig(compute_dtype=self.torch_dtype),
+            torch_dtype=self.torch_dtype,
+        )
+        # GGUF Kontext models are quantized with in_channels=128 (the actual runtime
+        # value after noise+reference concatenation), but FluxKontextPipeline expects
+        # in_channels=64 and handles the concatenation internally. Mismatch causes
+        # num_channels_latents=32 instead of 16, breaking _pack_latents for reference images.
+        if transformer.config.in_channels == 128:
+            transformer.config.in_channels = 64
+            logger.info("✓ Patched GGUF transformer in_channels: 128 → 64")
+        logger.info("✓ GGUF transformer loaded")
+
+        logger.info(f"Loading GGUF T5 encoder: {e_file} from {e_repo}")
+        text_encoder_2 = T5EncoderModel.from_pretrained(
+            e_repo,
+            gguf_file=e_file,
+            torch_dtype=self.torch_dtype,
+        )
+        logger.info("✓ GGUF T5 encoder loaded")
+
+        logger.info("Assembling pipeline (CLIP + VAE from original repo)...")
+        pipe = pipeline_cls.from_pretrained(
+            settings.FLUX_KONTEXT_MODEL,
+            transformer=transformer,
+            text_encoder_2=text_encoder_2,
+            torch_dtype=self.torch_dtype,
+        )
+        logger.info("✓ GGUF pipeline assembled")
+        return pipe
 
     def _get_device(self) -> str:
         """Determine the best device for inference."""
@@ -330,8 +416,10 @@ class FluxKontextImageGenerator(ImageGenerator):
     ) -> Optional[pathlib.Path]:
         """Generate a character portrait via text-to-image (no reference)."""
         try:
+            # Fixed suffix is ~22 CLIP tokens; budget ~55 tokens for the variable part.
+            clipped = self._shorten_prompt(prompt, max_words=40)
             enhanced_prompt = (
-                f"{prompt} | full-body or 3/4 view character portrait, "
+                f"{clipped} | full-body or 3/4 view character portrait, "
                 "painterly fantasy art, high detail, clean simple background"
             )
 
@@ -343,7 +431,7 @@ class FluxKontextImageGenerator(ImageGenerator):
                 num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
                 height=1024,
                 width=768,
-                max_sequence_length=77,
+                max_sequence_length=256,
                 generator=self._make_generator(),
             ).images[0]
 
@@ -375,7 +463,10 @@ class FluxKontextImageGenerator(ImageGenerator):
 
                 # Instruction-style prompt works best when conditioning on a
                 # reference image with Kontext.
-                compact_prompt = self._shorten_prompt(prompt)
+                # The fixed prefix (~20 tokens) + suffix (~9 tokens) leave ~48 tokens
+                # for the variable part before hitting CLIP's 77-token hard limit.
+                # 30 words ≈ 36 tokens, keeping the total comfortably under 77.
+                compact_prompt = self._shorten_prompt(prompt, max_words=30)
                 enhanced_prompt = (
                     "Use the reference character image and keep face, hair, "
                     "clothing and gear consistent. "
@@ -396,7 +487,7 @@ class FluxKontextImageGenerator(ImageGenerator):
                     num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
                     height=768,
                     width=1024,
-                    max_sequence_length=77,
+                    max_sequence_length=256,
                     generator=self._make_generator(),
                 ).images[0]
             else:
@@ -410,8 +501,8 @@ class FluxKontextImageGenerator(ImageGenerator):
                     guidance_scale=settings.FLUX_KONTEXT_GUIDANCE_SCALE,
                     num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
                     height=768,
-                    width=1344,
-                    max_sequence_length=77,
+                    width=1024,
+                    max_sequence_length=256,
                     generator=self._make_generator(),
                 ).images[0]
 
