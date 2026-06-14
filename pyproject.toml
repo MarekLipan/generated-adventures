@@ -14,22 +14,35 @@ dependencies = [
     "google-generativeai>=0.7.2",
     "Pillow>=10.5.0",
     "reportlab>=4.0.0",
+    "diffusers>=0.35.0",
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+    "transformers>=4.57.3",
+    "accelerate>=1.12.0",
+    "safetensors>=0.7.0",
+    "sentencepiece>=0.2.1",
+    "protobuf>=5.29.5",
+    "gguf>=0.10.0",
+    "optimum-quanto>=0.2.0",
 ]
 
-[project.optional-dependencies]
-# Local image generation (FLUX Kontext)
-# FLUX.1 Kontext [dev] requires diffusers >= 0.34 for FluxKontextPipeline.
-local-image = [
-    "torch>=2.0.0",
-    "diffusers>=0.34.0",
-    "transformers>=4.40.0",
-    "accelerate>=0.28.0",
-    "safetensors>=0.4.0",
-    "sentencepiece>=0.2.0",
-    "protobuf>=4.0.0",
-    "optimum-quanto>=0.2.0",
-    "gguf>=0.10.0",
-]
+# torch comes from the PyTorch CUDA 12.6 wheel index.
+# torchvision uses the CPU wheel — the CUDA build has a broken _C extension
+# on Windows/Python 3.13 (torchvision::nms operator not found), but the CPU
+# build works fine since we only need it for InterpolationMode in transformers.
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.setuptools]
 packages = ["core", "webapp"]

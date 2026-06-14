@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration settings."""
 
+    # Hugging Face token for downloading gated models (e.g. FLUX.1-Kontext-dev).
+    HUGGING_FACE_HUB_TOKEN: str = ""
+
     # Optional for local flux-kontext runs; required only when IMAGE_PROVIDER=gemini.
     GOOGLE_API_KEY: str = ""
 

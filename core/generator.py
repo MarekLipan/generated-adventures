@@ -161,9 +161,8 @@ def _generate_character_image_sync(
         f"Agility {concept.agility}"
     )
 
-    prompt_parts.append(
-        "Style: painterly, dramatic lighting, 3/4 view, no text, clean background, high detail."
-    )
+    # Art style is injected by the image backend (FluxKontextImageGenerator.GAME_ART_STYLE)
+    # so it applies uniformly to every image type. Do not add style keywords here.
 
     prompt_img = " ".join(prompt_parts)
     logger.info(f"Generating image for character: {concept.name}")

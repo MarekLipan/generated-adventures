@@ -160,6 +160,21 @@ class FluxKontextImageGenerator(ImageGenerator):
       single conditioning image (Kontext's recommended multi-reference approach).
     """
 
+    # Shared art-style anchor appended to every prompt so all images —
+    # portraits and scenes alike — share the same visual language.
+    # Named style anchors ("Hearthstone", "World of Warcraft") are far more
+    # effective than adjective lists because FLUX has seen millions of labeled
+    # examples and can reproduce the exact aesthetic on demand.
+    GAME_ART_STYLE = (
+        "Hearthstone card art, World of Warcraft Blizzard Entertainment concept art, "
+        "vibrant saturated colors, hand-painted digital illustration, visible painterly "
+        "brushstrokes, exaggerated heroic proportions, chunky oversized armor and "
+        "weapons, bold clear silhouette with strong outline, warm inviting lighting, "
+        "bright warm face illumination, strong rim lighting separating figure from "
+        "background, whimsical light-hearted fantasy tone, no photorealism, no text, "
+        "no watermarks"
+    )
+
     def __init__(self):
         try:
             import torch
@@ -185,12 +200,15 @@ class FluxKontextImageGenerator(ImageGenerator):
                 and settings.FLUX_KONTEXT_GGUF_T5
             )
 
+            hf_token = settings.HUGGING_FACE_HUB_TOKEN or None
+
             if use_gguf:
                 self.pipe = self._load_gguf_pipeline(FluxKontextPipeline)
             else:
                 self.pipe = FluxKontextPipeline.from_pretrained(
                     settings.FLUX_KONTEXT_MODEL,
                     torch_dtype=self.torch_dtype,
+                    token=hf_token,
                 )
 
                 # Runtime quantization via optimum-quanto (fallback when GGUF not set).
@@ -294,15 +312,28 @@ class FluxKontextImageGenerator(ImageGenerator):
         from huggingface_hub import hf_hub_download
         from transformers import T5EncoderModel
 
+        hf_token = settings.HUGGING_FACE_HUB_TOKEN or None
         t_repo, t_file = settings.FLUX_KONTEXT_GGUF_TRANSFORMER.split(":", 1)
         e_repo, e_file = settings.FLUX_KONTEXT_GGUF_T5.split(":", 1)
 
         logger.info(f"Loading GGUF transformer: {t_file} from {t_repo}")
-        transformer_path = hf_hub_download(repo_id=t_repo, filename=t_file)
+        transformer_path = hf_hub_download(repo_id=t_repo, filename=t_file, token=hf_token)
+        # FluxTransformer2DModel.load_config needs the transformer subfolder, not the
+        # pipeline root. Resolve the local cache path so no extra network call is needed.
+        import os
+        transformer_config_dir = os.path.dirname(
+            hf_hub_download(
+                repo_id=settings.FLUX_KONTEXT_MODEL,
+                filename="transformer/config.json",
+                token=hf_token,
+            )
+        )
         transformer = FluxTransformer2DModel.from_single_file(
             transformer_path,
             quantization_config=GGUFQuantizationConfig(compute_dtype=self.torch_dtype),
             torch_dtype=self.torch_dtype,
+            config=transformer_config_dir,
+            token=hf_token,
         )
         # GGUF Kontext models are quantized with in_channels=128 (the actual runtime
         # value after noise+reference concatenation), but FluxKontextPipeline expects
@@ -318,6 +349,7 @@ class FluxKontextImageGenerator(ImageGenerator):
             e_repo,
             gguf_file=e_file,
             torch_dtype=self.torch_dtype,
+            token=hf_token,
         )
         logger.info("✓ GGUF T5 encoder loaded")
 
@@ -327,6 +359,7 @@ class FluxKontextImageGenerator(ImageGenerator):
             transformer=transformer,
             text_encoder_2=text_encoder_2,
             torch_dtype=self.torch_dtype,
+            token=hf_token,
         )
         logger.info("✓ GGUF pipeline assembled")
         return pipe
@@ -358,8 +391,15 @@ class FluxKontextImageGenerator(ImageGenerator):
             return torch.Generator()
 
     @staticmethod
-    def _shorten_prompt(text: str, max_words: int = 45) -> str:
-        """Trim prompts to reduce CLIP truncation in reference-image mode."""
+    def _shorten_prompt(text: str, max_words: int = 300) -> str:
+        """Trim prompts to stay within T5's 512-token limit (~380 words).
+
+        FLUX uses two encoders: CLIP (77-token hard limit, ~55 words) and T5-XXL
+        (512 tokens, ~380 words).  T5 is the primary semantic encoder — all scene
+        detail, character descriptions, and action live here.  CLIP truncation is
+        harmless: it only loses broad stylistic cues at the end of the prompt.
+        Cap at 300 words to leave room for the fixed prefix/suffix we append.
+        """
         words = text.split()
         if len(words) <= max_words:
             return text
@@ -416,11 +456,10 @@ class FluxKontextImageGenerator(ImageGenerator):
     ) -> Optional[pathlib.Path]:
         """Generate a character portrait via text-to-image (no reference)."""
         try:
-            # Fixed suffix is ~22 CLIP tokens; budget ~55 tokens for the variable part.
-            clipped = self._shorten_prompt(prompt, max_words=40)
             enhanced_prompt = (
-                f"{clipped} | full-body or 3/4 view character portrait, "
-                "painterly fantasy art, high detail, clean simple background"
+                f"{self._shorten_prompt(prompt)} | "
+                f"full-body or 3/4 view character portrait, neutral background. "
+                f"{self.GAME_ART_STYLE}"
             )
 
             logger.info("FLUX Kontext: Generating character portrait...")
@@ -461,16 +500,15 @@ class FluxKontextImageGenerator(ImageGenerator):
                 # Ensure a standalone contiguous image object for downstream tensor conversion.
                 reference = reference.copy()
 
-                # Instruction-style prompt works best when conditioning on a
-                # reference image with Kontext.
-                # The fixed prefix (~20 tokens) + suffix (~9 tokens) leave ~48 tokens
-                # for the variable part before hitting CLIP's 77-token hard limit.
-                # 30 words ≈ 36 tokens, keeping the total comfortably under 77.
-                compact_prompt = self._shorten_prompt(prompt, max_words=30)
+                # T5-XXL handles up to 512 tokens (~380 words) and is FLUX's
+                # primary semantic encoder.  CLIP truncates at 77 tokens but only
+                # contributes broad stylistic cues — truncation is harmless.
+                # Use the full user prompt so rich scene descriptions are preserved.
                 enhanced_prompt = (
                     "Use the reference character image and keep face, hair, "
                     "clothing and gear consistent. "
-                    f"{compact_prompt}. Wide cinematic fantasy scene, dramatic lighting."
+                    f"{self._shorten_prompt(prompt)}. "
+                    f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
                 )
                 logger.info(
                     f"FLUX Kontext: Generating scene with "
@@ -492,8 +530,8 @@ class FluxKontextImageGenerator(ImageGenerator):
                 ).images[0]
             else:
                 enhanced_prompt = (
-                    f"{prompt} | cinematic composition, dramatic lighting, "
-                    "landscape orientation, painterly fantasy art"
+                    f"{self._shorten_prompt(prompt)}. "
+                    f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
                 )
                 logger.info("FLUX Kontext: Generating scene (no references)...")
                 result = self.pipe(

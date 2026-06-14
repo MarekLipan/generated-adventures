@@ -9,9 +9,11 @@ Quick start (one-time setup):
 Then run:
     python test_image_generation.py
 
-The most important test is #3 ("Consistency"): it generates a character portrait
-and then a scene that reuses that portrait as a reference, so you can visually
-confirm the SAME character appears in the scene.
+The most important tests are:
+  #3 — single-character consistency (portrait → scene)
+  #5 — party composition grid: generate 3 portraits, build a grid, generate an
+        action scene using the grid as the one reference image so all characters
+        appear consistently in the same scene.
 
 NOTE: FLUX.1 Kontext [dev] is a 12B model. The first run downloads the weights
 (~24GB) from Hugging Face and may require accepting the model license at
@@ -26,18 +28,16 @@ import sys
 from core.config import settings
 from core.image_backends import get_image_generator
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
-# Test output directory
 TEST_OUTPUT_DIR = pathlib.Path("test_images")
 TEST_OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Shared paths so tests can build on each other
+# ── Single-character test (legacy) ───────────────────────────────────────────
+
 CHARACTER_PORTRAIT_PATH = TEST_OUTPUT_DIR / "character_portrait_elara.png"
 
-# A realistic character prompt, similar to what the game produces
 CHARACTER_PROMPT = (
     "Generate a high quality fantasy character portrait. "
     "Character Name: Elara Moonwhisper. "
@@ -50,11 +50,64 @@ CHARACTER_PROMPT = (
     "Style: painterly, dramatic lighting, 3/4 view, no text."
 )
 
+# ── Party of 3 ────────────────────────────────────────────────────────────────
+# Portrait prompts are processed by T5-XXL (up to ~380 words) as the primary
+# encoder.  The backend appends a portrait-style suffix automatically.
+
+PARTY = [
+    {
+        "name": "Elara Moonwhisper",
+        "role": "Mage",
+        "portrait_path": TEST_OUTPUT_DIR / "portrait_elara.png",
+        "prompt": (
+            "Elara Moonwhisper, tall elf mage, long silver hair, piercing blue eyes, "
+            "midnight blue robes with glowing silver runes, ornate staff topped with "
+            "a large crackling blue crystal, confident magical pose"
+        ),
+    },
+    {
+        "name": "Gareth Ironwall",
+        "role": "Warrior",
+        "portrait_path": TEST_OUTPUT_DIR / "portrait_gareth.png",
+        "prompt": (
+            "Gareth Ironwall, stocky dwarf warrior, enormous braided red beard, "
+            "chunky heavy iron plate armor covered in battle dents, massive "
+            "battle-axe resting on shoulder, fierce grinning expression"
+        ),
+    },
+    {
+        "name": "Lyra Swiftarrow",
+        "role": "Ranger",
+        "portrait_path": TEST_OUTPUT_DIR / "portrait_lyra.png",
+        "prompt": (
+            "Lyra Swiftarrow, agile human ranger, short auburn hair, sharp green eyes, "
+            "dark green hooded leather coat with silver buckles, recurve bow drawn "
+            "and ready, alert focused expression"
+        ),
+    },
+]
+
+PARTY_GRID_PATH = TEST_OUTPUT_DIR / "party_grid.png"
+
+PARTY_SCENE_PROMPT = (
+    "Elara Moonwhisper, Gareth Ironwall, and Lyra Swiftarrow are locked in a fierce "
+    "battle inside a crumbling underground dungeon. Elara stands at the center, both "
+    "hands raised, hurling a crackling bolt of blue lightning from her crystal-topped "
+    "staff at a towering stone golem. Gareth charges from the left, red beard flying, "
+    "swinging his massive battle-axe in a wide arc into the golem's leg, sparks and "
+    "stone chips flying on impact. Lyra crouches on a crumbling stone balcony above, "
+    "drawing her recurve bow with fierce concentration, an arrow already in flight "
+    "toward the golem's glowing eye socket. The dungeon is lit by flickering wall "
+    "torches and the blue glow of Elara's spell, casting dramatic shadows across "
+    "ancient carved stone walls. Dynamic action, motion, high detail, painterly fantasy art."
+)
+
 
 def _get_generator():
-    """Build the configured image generator (loads the model   on first call)."""
     return get_image_generator()
 
+
+# ── Individual test functions ─────────────────────────────────────────────────
 
 def test_character_portrait(generator=None):
     """Generate a sample fantasy character portrait (text-to-image)."""
@@ -69,7 +122,6 @@ def test_character_portrait(generator=None):
 
     if result:
         logger.info(f"✅ SUCCESS! Character portrait saved to: {result}")
-        logger.info(f"   Open it: open {result}")
     else:
         logger.error("❌ Failed to generate character portrait")
     return result
@@ -96,25 +148,19 @@ def test_simple_scene(generator=None):
 
     if result:
         logger.info(f"✅ SUCCESS! Simple scene saved to: {result}")
-        logger.info(f"   Open it: open {result}")
     else:
         logger.error("❌ Failed to generate simple scene")
     return result
 
 
 def test_character_consistency(generator=None):
-    """THE KEY TEST: generate a scene that reuses the character portrait.
-
-    This proves the backend keeps the SAME character consistent across images,
-    which is the whole point of using FLUX.1 Kontext locally.
-    """
+    """THE KEY TEST: generate a scene that reuses the character portrait."""
     logger.info("\n" + "=" * 60)
     logger.info("🎭 TESTING CHARACTER CONSISTENCY (portrait -> scene)")
     logger.info("=" * 60)
 
     generator = generator or _get_generator()
 
-    # Make sure we have a reference portrait to reuse.
     if not CHARACTER_PORTRAIT_PATH.exists():
         logger.info("No reference portrait yet — generating one first...")
         if not test_character_portrait(generator):
@@ -143,29 +189,117 @@ def test_character_consistency(generator=None):
 
     if result:
         logger.info(f"✅ SUCCESS! Scene saved to: {result}")
-        logger.info(
-            "   Compare the character in this scene with the reference portrait:"
-        )
+        logger.info("   Compare character vs reference:")
         logger.info(f"     reference: {CHARACTER_PORTRAIT_PATH}")
         logger.info(f"     scene:     {result}")
-        logger.info("   The face, hair, robes and staff should match!")
     else:
         logger.error("❌ Failed to generate scene with reference")
     return result
 
 
+def _build_party_grid(portrait_paths: list[pathlib.Path], output_path: pathlib.Path) -> pathlib.Path:
+    """Stitch portrait images into a horizontal grid and save it."""
+    from PIL import Image
+
+    images = [Image.open(p).convert("RGB") for p in portrait_paths]
+
+    # Normalise height so the strip looks balanced.
+    target_h = 768
+    resized = [img.resize((int(img.width * target_h / img.height), target_h), Image.LANCZOS) for img in images]
+
+    gap = 6
+    total_w = sum(img.width for img in resized) + gap * (len(resized) - 1)
+    grid = Image.new("RGB", (total_w, target_h), (30, 30, 30))
+
+    x = 0
+    for img in resized:
+        grid.paste(img, (x, 0))
+        x += img.width + gap
+
+    grid.save(output_path)
+    logger.info(f"✓ Party grid saved to {output_path}  ({total_w}×{target_h})")
+    return output_path
+
+
+def test_party_composition(generator=None):
+    """Generate 3 character portraits, compose them into a grid, then generate
+    an action scene using the grid as the single FLUX Kontext reference so all
+    characters appear consistently and actively in the same image.
+
+    Flow:
+      1. Generate portrait_elara.png  (skip if exists)
+      2. Generate portrait_gareth.png (skip if exists)
+      3. Generate portrait_lyra.png   (skip if exists)
+      4. Stitch the 3 portraits into party_grid.png
+      5. Generate a dungeon battle scene with party_grid.png as the reference
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("⚔️  TESTING PARTY COMPOSITION + ACTION SCENE")
+    logger.info("=" * 60)
+
+    generator = generator or _get_generator()
+
+    # Step 1–3: Portraits (skip if already generated, unless --regen passed).
+    force_regen = "--regen" in sys.argv
+    for member in PARTY:
+        path: pathlib.Path = member["portrait_path"]
+        if path.exists() and not force_regen:
+            logger.info(f"  ↩  {member['name']} portrait already exists, skipping  (use --regen to regenerate)")
+            continue
+        if path.exists() and force_regen:
+            path.unlink()
+            logger.info(f"  ♻  Deleted old portrait for {member['name']}")
+
+        logger.info(f"  Generating portrait: {member['name']} ({member['role']})…")
+        result = generator.generate_character_image(
+            prompt=member["prompt"],
+            output_path=path,
+        )
+        if not result:
+            logger.error(f"❌ Failed to generate portrait for {member['name']}")
+            return None
+        logger.info(f"  ✓ {member['name']} → {path.name}")
+
+    # Step 4: Build the grid.
+    logger.info("  Building party grid…")
+    portrait_paths = [m["portrait_path"] for m in PARTY]
+    if not all(p.exists() for p in portrait_paths):
+        logger.error("❌ One or more portraits missing — cannot build grid")
+        return None
+    _build_party_grid(portrait_paths, PARTY_GRID_PATH)
+
+    # Step 5: Action scene.
+    logger.info("  Generating party action scene with grid reference…")
+    output_path = TEST_OUTPUT_DIR / "party_action_scene.png"
+    result = generator.generate_scene_image(
+        prompt=PARTY_SCENE_PROMPT,
+        output_path=output_path,
+        reference_images=[PARTY_GRID_PATH],
+    )
+
+    if result:
+        logger.info(f"✅ SUCCESS! Party scene saved to: {result}")
+        logger.info("   Check that all 3 characters appear in the scene:")
+        for member in PARTY:
+            logger.info(f"     • {member['name']} ({member['role']})")
+        logger.info(f"   Reference grid: {PARTY_GRID_PATH}")
+        logger.info(f"   Action scene:   {result}")
+    else:
+        logger.error("❌ Failed to generate party action scene")
+    return result
+
+
+# ── Main menu ─────────────────────────────────────────────────────────────────
+
 def main():
-    """Run image generation tests."""
-    print("\n" + "🎨" * 30)
+    print("\n" + "=" * 60)
     print("   IMAGE GENERATION TEST SUITE")
-    print("🎨" * 30)
+    print("=" * 60)
     print("\nCurrent Configuration:")
     print(f"  Provider: {settings.IMAGE_PROVIDER}")
     if settings.IMAGE_PROVIDER == "flux-kontext":
         print(f"  Model: {settings.FLUX_KONTEXT_MODEL}")
-        print(f"  Guidance Scale: {settings.FLUX_KONTEXT_GUIDANCE_SCALE}")
-        print(f"  CPU Offload (low-memory mode): {settings.IMAGE_ENABLE_CPU_OFFLOAD}")
-
+        print(f"  CPU Offload: {settings.IMAGE_ENABLE_CPU_OFFLOAD}")
     print(f"  Device: {settings.IMAGE_DEVICE}")
     print(f"  Inference Steps: {settings.IMAGE_NUM_INFERENCE_STEPS}")
 
@@ -176,15 +310,15 @@ def main():
 
     print(f"\nOutput Directory: {TEST_OUTPUT_DIR.absolute()}")
     print("\n" + "-" * 60)
-
     print("\nSelect test to run:")
-    print("  1. Character Portrait")
+    print("  1. Character Portrait (single character, text-only)")
     print("  2. Simple Scene (no references)")
-    print("  3. Character Consistency (portrait -> scene)  ⭐ recommended")
-    print("  4. All Tests")
+    print("  3. Character Consistency (portrait → scene)  ⭐ quick reference test")
+    print("  4. All Tests (1+2+3)")
+    print("  5. Party Composition + Action Scene  ⭐ multi-character grid test")
     print("  q. Quit")
 
-    choice = input("\nYour choice (1-4 or q): ").strip()
+    choice = input("\nYour choice (1-5 or q): ").strip()
 
     try:
         if choice == "1":
@@ -194,22 +328,22 @@ def main():
         elif choice == "3":
             test_character_consistency()
         elif choice == "4":
-            # Reuse one generator instance so the model loads only once.
             generator = _get_generator()
             test_character_portrait(generator)
             test_simple_scene(generator)
             test_character_consistency(generator)
+        elif choice == "5":
+            test_party_composition()
         elif choice.lower() == "q":
             print("Exiting.")
             sys.exit(0)
         else:
-            print(f"Invalid choice: {choice}")
+            print(f"Invalid choice: {choice!r}")
             sys.exit(1)
 
         print("\n" + "=" * 60)
         print("✅ TEST COMPLETE!")
-        print(f"📁 Check your results in: {TEST_OUTPUT_DIR.absolute()}")
-        print(f"🖼️  Open folder: open {TEST_OUTPUT_DIR.absolute()}")
+        print(f"📁 Results in: {TEST_OUTPUT_DIR.absolute()}")
         print("=" * 60 + "\n")
 
     except KeyboardInterrupt:
