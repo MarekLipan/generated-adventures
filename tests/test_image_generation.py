@@ -25,6 +25,9 @@ import logging
 import pathlib
 import sys
 
+# Ensure the project root is on the path when running this script directly.
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+
 from core.config import settings
 from core.image_backends import get_image_generator
 
@@ -289,6 +292,239 @@ def test_party_composition(generator=None):
     return result
 
 
+def test_two_character_scene():
+    """Pass 2 character portraits as separate reference images (not a grid).
+
+    FluxKontextPipeline natively accepts a list of images — each is VAE-encoded
+    independently so FLUX attends to them as distinct characters rather than
+    trying to edit a collage.  This is the correct multi-reference approach.
+
+    Run test 5 first to generate the portraits.
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("👥 TESTING 2-CHARACTER SCENE (separate reference images)")
+    logger.info("=" * 60)
+
+    # Use the first two party members — mage + warrior is a good visual contrast.
+    char_a, char_b = PARTY[0], PARTY[1]
+    for m in (char_a, char_b):
+        if not m["portrait_path"].exists():
+            logger.error(
+                f"❌ Missing portrait: {m['portrait_path'].name} — run test 5 first."
+            )
+            return None
+
+    prompt = (
+        f"{char_a['name']} the {char_a['role']} and {char_b['name']} the {char_b['role']} "
+        "stand back-to-back at the entrance of a torchlit dungeon, bracing for battle. "
+        f"{char_a['name']} holds her glowing staff aloft, blue light illuminating the stone "
+        f"walls. {char_b['name']} grips his battle-axe with both hands, eyes scanning the "
+        "shadows ahead. Tense, dramatic atmosphere, warm torchlight against cool magical glow."
+    )
+
+    output_path = TEST_OUTPUT_DIR / "scene_two_characters.png"
+    generator = _get_generator()
+
+    result = generator.generate_scene_image(
+        prompt=prompt,
+        output_path=output_path,
+        reference_images=[char_a["portrait_path"], char_b["portrait_path"]],
+    )
+
+    if result:
+        logger.info(f"✅ SUCCESS! Scene saved to: {result}")
+        logger.info("   Check whether both characters match their portraits:")
+        logger.info(f"     {char_a['name']:20s} → {char_a['portrait_path'].name}")
+        logger.info(f"     {char_b['name']:20s} → {char_b['portrait_path'].name}")
+        logger.info(f"     scene                → {output_path.name}")
+    else:
+        logger.error("❌ Failed to generate 2-character scene")
+    return result
+
+
+def test_klein_portrait_and_scene():
+    """FLUX.2 Klein: single portrait then consistency scene — quality comparison vs Kontext.
+
+    Generates Elara's portrait with Klein, then generates a scene with that portrait
+    as a single reference.  Compare the outputs to test 3 (FLUX.1 Kontext) to judge
+    whether Klein's quality is sufficient for the game.
+
+    Klein 9B distilled runs in only 4 inference steps — expect a big speed gain.
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("🔷 TESTING FLUX.2 KLEIN — Portrait + Single-Character Scene")
+    logger.info("=" * 60)
+
+    from core.image_backends import FluxKleinImageGenerator
+
+    gen = FluxKleinImageGenerator()
+
+    portrait_path = TEST_OUTPUT_DIR / "klein_portrait_elara.png"
+    logger.info("  [1/2] Generating Klein portrait of Elara...")
+    result = gen.generate_character_image(
+        prompt=PARTY[0]["prompt"],
+        output_path=portrait_path,
+    )
+    if not result:
+        logger.error("❌ Klein portrait generation failed")
+        return None
+    logger.info(f"  ✓ Portrait → {portrait_path.name}")
+
+    scene_path = TEST_OUTPUT_DIR / "klein_scene_elara_temple.png"
+    scene_prompt = (
+        "Elara Moonwhisper stands inside a vast frozen glacier temple. "
+        "Massive ice pillars covered in glowing blue runes frame her. "
+        "She raises her crystal-topped staff, casting soft blue light across "
+        "the smooth ice floor. Ethereal, magical, cold atmosphere."
+    )
+    logger.info("  [2/2] Generating Klein scene with portrait as reference...")
+    result = gen.generate_scene_image(
+        prompt=scene_prompt,
+        output_path=scene_path,
+        reference_images=[portrait_path],
+    )
+    if result:
+        logger.info(f"✅ SUCCESS! Compare to FLUX.1 Kontext test 3 output:")
+        logger.info(f"   Klein portrait: {portrait_path.name}")
+        logger.info(f"   Klein scene:    {scene_path.name}")
+        logger.info(f"   Kontext scene:  scene_with_reference_elara_temple.png")
+    else:
+        logger.error("❌ Klein scene generation failed")
+    return result
+
+
+def test_klein_multi_character():
+    """FLUX.2 Klein: native multi-image reference — the key test.
+
+    Generates fresh Klein portraits for all 3 party members, then generates a
+    party battle scene passing ALL portraits as a native image list (no stitching).
+    This is Klein's primary advantage over FLUX.1 Kontext.
+
+    Compare output to test 5 (FLUX.1 Kontext party grid) to judge consistency.
+    Pass --regen to force regeneration of Klein portraits.
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("⚔️  TESTING FLUX.2 KLEIN — Native Multi-Character Scene")
+    logger.info("=" * 60)
+
+    from core.image_backends import FluxKleinImageGenerator
+
+    gen = FluxKleinImageGenerator()
+    force_regen = "--regen" in sys.argv
+
+    klein_portraits: list[pathlib.Path] = []
+    for member in PARTY:
+        klein_path = TEST_OUTPUT_DIR / f"klein_portrait_{member['name'].split()[0].lower()}.png"
+        if klein_path.exists() and not force_regen:
+            logger.info(f"  ↩  Klein portrait for {member['name']} already exists (--regen to redo)")
+        else:
+            if klein_path.exists():
+                klein_path.unlink()
+            logger.info(f"  Generating Klein portrait: {member['name']}...")
+            result = gen.generate_character_image(
+                prompt=member["prompt"],
+                output_path=klein_path,
+            )
+            if not result:
+                logger.error(f"❌ Failed to generate Klein portrait for {member['name']}")
+                return None
+            logger.info(f"  ✓ {member['name']} → {klein_path.name}")
+        klein_portraits.append(klein_path)
+
+    scene_path = TEST_OUTPUT_DIR / "klein_party_scene.png"
+    logger.info(
+        f"  Generating party scene with {len(klein_portraits)} native references (no stitching)..."
+    )
+    result = gen.generate_scene_image(
+        prompt=PARTY_SCENE_PROMPT,
+        output_path=scene_path,
+        reference_images=klein_portraits,
+    )
+
+    if result:
+        logger.info(f"✅ SUCCESS! Compare to FLUX.1 Kontext party scene (test 5):")
+        logger.info(f"   Klein scene:   {scene_path.name}")
+        logger.info(f"   Kontext scene: party_action_scene.png")
+        logger.info("   Check: do characters resemble their Klein portraits more than in Kontext?")
+    else:
+        logger.error("❌ Klein multi-character scene generation failed")
+    return result
+
+
+def test_ip_adapter_comparison():
+    """Side-by-side comparison: SDXL + IP-Adapter vs FLUX Kontext.
+
+    Reuses the three FLUX portraits from test 5 as reference images so both
+    backends see identical inputs.  Generates the same party battle scene with
+    each backend and saves both results for direct visual comparison.
+
+    Run test 5 first to create the portrait files, then run this test.
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("🔬 IP-ADAPTER vs FLUX KONTEXT COMPARISON")
+    logger.info("=" * 60)
+
+    portraits = [m["portrait_path"] for m in PARTY]
+    missing = [p for p in portraits if not p.exists()]
+    if missing:
+        logger.error(
+            f"❌ Missing portrait(s): {[p.name for p in missing]}\n"
+            "   Run test 5 first to generate the party portraits."
+        )
+        return None
+
+    scene_prompt = PARTY_SCENE_PROMPT
+
+    results = {}
+
+    # ── FLUX Kontext scene (reuse existing generator if possible) ──────────────
+    logger.info("\n  [1/2] Generating scene with FLUX Kontext (party grid reference)...")
+    flux_path = TEST_OUTPUT_DIR / "comparison_flux_kontext.png"
+    try:
+        flux_gen = get_image_generator()  # uses IMAGE_PROVIDER from .env
+        result = flux_gen.generate_scene_image(
+            prompt=scene_prompt,
+            output_path=flux_path,
+            reference_images=portraits,
+        )
+        if result:
+            results["flux-kontext"] = flux_path
+            logger.info(f"  ✓ FLUX Kontext → {flux_path.name}")
+        else:
+            logger.warning("  ⚠  FLUX Kontext scene generation failed")
+    except Exception as e:
+        logger.warning(f"  ⚠  FLUX Kontext failed: {e}")
+
+    # ── SDXL + IP-Adapter scene ────────────────────────────────────────────────
+    logger.info("\n  [2/2] Generating scene with SDXL + IP-Adapter...")
+    sdxl_path = TEST_OUTPUT_DIR / "comparison_sdxl_ip_adapter.png"
+    try:
+        from core.image_backends import SDXLIPAdapterImageGenerator
+        sdxl_gen = SDXLIPAdapterImageGenerator()
+        result = sdxl_gen.generate_scene_image(
+            prompt=scene_prompt,
+            output_path=sdxl_path,
+            reference_images=portraits,
+        )
+        if result:
+            results["sdxl-ip-adapter"] = sdxl_path
+            logger.info(f"  ✓ SDXL IP-Adapter → {sdxl_path.name}")
+        else:
+            logger.warning("  ⚠  SDXL IP-Adapter scene generation failed")
+    except Exception as e:
+        logger.warning(f"  ⚠  SDXL IP-Adapter failed: {e}")
+
+    if results:
+        logger.info("\n✅ Comparison complete — open both files side by side:")
+        for name, path in results.items():
+            logger.info(f"   {name:20s} → {path}")
+        logger.info("\n  Ask yourself:")
+        logger.info("  • Do the characters look like the portraits?")
+        logger.info("  • Which art style looks more like Hearthstone?")
+        logger.info("  • Is the quality difference acceptable for the game?")
+    return results
+
+
 # ── Main menu ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -315,10 +551,14 @@ def main():
     print("  2. Simple Scene (no references)")
     print("  3. Character Consistency (portrait → scene)  ⭐ quick reference test")
     print("  4. All Tests (1+2+3)")
-    print("  5. Party Composition + Action Scene  ⭐ multi-character grid test")
+    print("  5. Party Composition + Action Scene  (grid reference)")
+    print("  6. Two-Character Scene  ⭐ separate reference images, no grid")
+    print("  7. IP-Adapter vs FLUX Kontext comparison  (requires test 5 portraits)")
+    print("  8. FLUX.2 Klein — Portrait + Single-Character Scene  ⭐ quality vs speed")
+    print("  9. FLUX.2 Klein — Native Multi-Character Scene  ⭐ no stitching")
     print("  q. Quit")
 
-    choice = input("\nYour choice (1-5 or q): ").strip()
+    choice = input("\nYour choice (1-9 or q): ").strip()
 
     try:
         if choice == "1":
@@ -334,6 +574,14 @@ def main():
             test_character_consistency(generator)
         elif choice == "5":
             test_party_composition()
+        elif choice == "6":
+            test_two_character_scene()
+        elif choice == "7":
+            test_ip_adapter_comparison()
+        elif choice == "8":
+            test_klein_portrait_and_scene()
+        elif choice == "9":
+            test_klein_multi_character()
         elif choice.lower() == "q":
             print("Exiting.")
             sys.exit(0)

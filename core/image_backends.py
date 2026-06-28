@@ -488,36 +488,46 @@ class FluxKontextImageGenerator(ImageGenerator):
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
     ) -> Optional[pathlib.Path]:
-        """Generate a scene image, keeping characters consistent via references."""
+        """Generate a scene image, keeping characters consistent via references.
+
+        Multiple reference portraits are stitched side-by-side into a single
+        512×512-per-character composite before being passed to the pipeline.
+        FluxKontextPipeline only accepts a single image tensor; passing a Python
+        list triggers a batch-generation path that crashes in _pack_latents.
+
+        Each portrait is resized to 512×512 so the combined reference stays at
+        a FLUX-friendly size (e.g. 1024×512 for two characters).
+        """
         try:
-            reference = (
-                self._stitch_reference_images(reference_images)
-                if reference_images
-                else None
-            )
+            if reference_images:
+                SLOT = 512  # px per character slot — keeps total ref image compact
+                slots = [
+                    Image.open(p).convert("RGB").resize((SLOT, SLOT), Image.LANCZOS)
+                    for p in reference_images
+                ]
+                if len(slots) == 1:
+                    reference = slots[0]
+                else:
+                    # Side-by-side strip; thin dark separator between characters.
+                    gap = 4
+                    total_w = SLOT * len(slots) + gap * (len(slots) - 1)
+                    reference = Image.new("RGB", (total_w, SLOT), (20, 20, 20))
+                    x = 0
+                    for slot in slots:
+                        reference.paste(slot, (x, 0))
+                        x += SLOT + gap
 
-            if reference is not None:
-                # Ensure a standalone contiguous image object for downstream tensor conversion.
-                reference = reference.copy()
-
-                # T5-XXL handles up to 512 tokens (~380 words) and is FLUX's
-                # primary semantic encoder.  CLIP truncates at 77 tokens but only
-                # contributes broad stylistic cues — truncation is harmless.
-                # Use the full user prompt so rich scene descriptions are preserved.
+                n = len(reference_images)
                 enhanced_prompt = (
-                    "Use the reference character image and keep face, hair, "
-                    "clothing and gear consistent. "
+                    f"Keep all {n} reference character(s) consistent — same face, "
+                    "hair, clothing and gear. "
                     f"{self._shorten_prompt(prompt)}. "
                     f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
                 )
                 logger.info(
-                    f"FLUX Kontext: Generating scene with "
-                    f"{len(reference_images)} reference image(s) for consistency"
+                    f"FLUX Kontext: Generating scene with {n} reference image(s) "
+                    f"(stitched to {reference.width}×{reference.height})"
                 )
-                # The reference path concatenates the encoded image latents with
-                # the noise latents, doubling the attention sequence length and
-                # therefore peak memory. Use a more modest canvas here so it fits
-                # within constrained (e.g. Apple Silicon MPS) memory budgets.
                 result = self.pipe(
                     image=reference,
                     prompt=enhanced_prompt,
@@ -553,6 +563,326 @@ class FluxKontextImageGenerator(ImageGenerator):
             return None
 
 
+class FluxKleinImageGenerator(ImageGenerator):
+    """Image generator using FLUX.2 Klein [9B or 4B] — native multi-reference.
+
+    Key differences from FLUX.1 Kontext:
+    - Native multi-image: pass image=[img1, img2, ...] directly, no stitching.
+    - 9B distilled model runs in just 4 steps vs 30 for Kontext.
+    - Fits on RTX 3080 with CPU offload (BF16 ~18 GB paged through 10 GB VRAM).
+    - For best speed/VRAM: use GGUF Q4_K_M (~5.5 GB, full VRAM residency).
+    """
+
+    GAME_ART_STYLE = FluxKontextImageGenerator.GAME_ART_STYLE
+
+    def __init__(self):
+        try:
+            import torch
+            from diffusers import Flux2KleinPipeline
+
+            logger.info(f"Initializing FLUX.2 Klein: {settings.FLUX_KLEIN_MODEL}")
+            self.device = self._get_device()
+            logger.info(f"Using device: {self.device}")
+            self.torch_dtype = torch.float32 if self.device == "cpu" else torch.bfloat16
+
+            hf_token = settings.HUGGING_FACE_HUB_TOKEN or None
+            self.pipe = Flux2KleinPipeline.from_pretrained(
+                settings.FLUX_KLEIN_MODEL,
+                torch_dtype=self.torch_dtype,
+                token=hf_token,
+            )
+
+            self.cpu_offload_enabled = False
+            if settings.IMAGE_ENABLE_CPU_OFFLOAD and self.device != "cpu":
+                try:
+                    self.pipe.enable_model_cpu_offload(device=self.device)
+                    self.cpu_offload_enabled = True
+                    logger.info("✓ Model CPU offload enabled")
+                except Exception as offload_err:
+                    logger.warning(
+                        f"CPU offload unavailable ({offload_err}); "
+                        f"placing directly on {self.device}"
+                    )
+                    self.pipe = self.pipe.to(self.device)
+            else:
+                self.pipe = self.pipe.to(self.device)
+
+            try:
+                self.pipe.vae.enable_slicing()
+                if self.device != "mps":
+                    self.pipe.vae.enable_tiling()
+            except Exception:
+                pass
+
+            logger.info("✓ FLUX.2 Klein pipeline ready")
+
+        except ImportError as e:
+            raise ImportError(
+                "FLUX.2 Klein requires diffusers>=0.38.0:\n"
+                "  pip install -U diffusers\n"
+                f"Error: {e}"
+            ) from e
+
+    def _get_device(self) -> str:
+        import torch
+
+        if settings.IMAGE_DEVICE != "auto":
+            return settings.IMAGE_DEVICE
+        if torch.cuda.is_available():
+            return "cuda"
+        elif torch.backends.mps.is_available():
+            return "mps"
+        logger.warning("No GPU detected, using CPU (will be very slow)")
+        return "cpu"
+
+    def _make_generator(self):
+        import torch
+
+        gen_device = "cpu" if self.cpu_offload_enabled else self.device
+        try:
+            return torch.Generator(device=gen_device)
+        except Exception:
+            return torch.Generator()
+
+    def generate_character_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+    ) -> Optional[pathlib.Path]:
+        try:
+            enhanced_prompt = (
+                f"{prompt} | full-body or 3/4 view character portrait, neutral background. "
+                f"{self.GAME_ART_STYLE}"
+            )
+            logger.info("FLUX.2 Klein: Generating character portrait...")
+            image = self.pipe(
+                prompt=enhanced_prompt,
+                guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                height=1024,
+                width=768,
+                generator=self._make_generator(),
+            ).images[0]
+            image.save(output_path)
+            logger.info(f"✓ FLUX.2 Klein: Saved character image to {output_path}")
+            return output_path
+        except Exception as e:
+            logger.error(f"FLUX.2 Klein character generation failed: {e}")
+            return None
+
+    def generate_scene_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+    ) -> Optional[pathlib.Path]:
+        try:
+            if reference_images:
+                refs = []
+                for p in reference_images:
+                    p = pathlib.Path(p)
+                    if p.exists():
+                        # Klein expects square-ish reference images.
+                        refs.append(
+                            Image.open(p).convert("RGB").resize((1024, 1024), Image.LANCZOS)
+                        )
+                    else:
+                        logger.warning(f"Reference image not found: {p}")
+
+                n = len(refs)
+                enhanced_prompt = (
+                    f"Keep all {n} reference character(s) consistent — same face, "
+                    f"hair, clothing and gear. {prompt}. "
+                    f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
+                )
+                logger.info(
+                    f"FLUX.2 Klein: Generating scene with {n} native reference image(s)..."
+                )
+                result = self.pipe(
+                    prompt=enhanced_prompt,
+                    image=refs,
+                    guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                    num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                    height=768,
+                    width=1024,
+                    generator=self._make_generator(),
+                ).images[0]
+            else:
+                enhanced_prompt = (
+                    f"{prompt}. Wide cinematic composition, landscape orientation. "
+                    f"{self.GAME_ART_STYLE}"
+                )
+                logger.info("FLUX.2 Klein: Generating scene (no references)...")
+                result = self.pipe(
+                    prompt=enhanced_prompt,
+                    guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                    num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                    height=768,
+                    width=1024,
+                    generator=self._make_generator(),
+                ).images[0]
+
+            result.save(output_path)
+            logger.info(f"✓ FLUX.2 Klein: Saved scene to {output_path}")
+            return output_path
+
+        except Exception as e:
+            logger.exception(f"FLUX.2 Klein scene generation failed: {e}")
+            return None
+
+
+class SDXLIPAdapterImageGenerator(ImageGenerator):
+    """Image generator using SDXL + IP-Adapter.
+
+    IP-Adapter encodes a reference image through CLIP's image encoder and injects
+    those features into the UNet's cross-attention layers.  This gives approximate
+    style/content consistency (same colour palette, general character vibe) without
+    the doubled attention cost of FLUX Kontext's latent-concatenation approach.
+
+    Trade-offs vs FLUX Kontext:
+    - Faster scene generation (fixed encoder overhead, not sequence doubling)
+    - Lower base image quality (SDXL ~3B vs FLUX 12B)
+    - Character consistency is style-level, not identity-level
+    """
+
+    # Same Hearthstone-style anchor as FLUX backend for fair comparison.
+    GAME_ART_STYLE = FluxKontextImageGenerator.GAME_ART_STYLE
+
+    def __init__(self):
+        try:
+            import torch
+            from diffusers import StableDiffusionXLPipeline
+
+            logger.info(f"Initializing SDXL + IP-Adapter: {settings.SDXL_MODEL}")
+
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                self.device = "mps"
+            logger.info(f"Using device: {self.device}")
+
+            self.pipe = StableDiffusionXLPipeline.from_pretrained(
+                settings.SDXL_MODEL,
+                torch_dtype=torch.float16,
+                variant="fp16",
+                use_safetensors=True,
+            )
+
+            self.pipe.load_ip_adapter(
+                "h94/IP-Adapter",
+                subfolder="sdxl_models",
+                weight_name="ip-adapter_sdxl.bin",
+            )
+            self.pipe.set_ip_adapter_scale(settings.SDXL_IP_ADAPTER_SCALE)
+
+            self.pipe.enable_model_cpu_offload()
+            logger.info("✓ SDXL + IP-Adapter pipeline ready")
+
+        except ImportError as e:
+            raise ImportError(
+                f"SDXL IP-Adapter backend requires diffusers and torch:\n"
+                f"  pip install diffusers torch transformers accelerate\n"
+                f"Error: {e}"
+            ) from e
+
+    def generate_character_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+    ) -> Optional[pathlib.Path]:
+        """Generate a character portrait (text-only, no IP-Adapter reference)."""
+        try:
+            full_prompt = (
+                f"{prompt}. Full-body or 3/4 view character portrait, neutral background. "
+                f"{self.GAME_ART_STYLE}"
+            )
+            negative = (
+                "photorealistic, photograph, blurry, ugly, deformed, text, watermark, "
+                "signature, bad anatomy, extra limbs"
+            )
+            logger.info("SDXL: Generating character portrait...")
+            image = self.pipe(
+                prompt=full_prompt,
+                negative_prompt=negative,
+                num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
+                height=1024,
+                width=768,
+                ip_adapter_image=Image.new("RGB", (1024, 1024), (128, 128, 128)),
+            ).images[0]
+            image.save(output_path)
+            logger.info(f"✓ SDXL: Saved character portrait to {output_path}")
+            return output_path
+        except Exception as e:
+            logger.error(f"SDXL character generation failed: {e}")
+            return None
+
+    def generate_scene_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+    ) -> Optional[pathlib.Path]:
+        """Generate a scene. With references, IP-Adapter injects their style."""
+        try:
+            full_prompt = (
+                f"{prompt}. Wide cinematic composition, landscape orientation. "
+                f"{self.GAME_ART_STYLE}"
+            )
+            negative = (
+                "photorealistic, photograph, blurry, ugly, deformed, text, watermark, "
+                "signature, bad anatomy, extra limbs"
+            )
+
+            if reference_images:
+                # Stitch multiple reference images into one (same as FLUX approach)
+                # then use it as the IP-Adapter conditioning image.
+                from PIL import Image as PILImage
+                refs = [PILImage.open(p).convert("RGB") for p in reference_images]
+                if len(refs) == 1:
+                    ip_image = refs[0]
+                else:
+                    target_h = 512
+                    resized = [
+                        r.resize((int(r.width * target_h / r.height), target_h))
+                        for r in refs
+                    ]
+                    total_w = sum(r.width for r in resized)
+                    ip_image = PILImage.new("RGB", (total_w, target_h), (30, 30, 30))
+                    x = 0
+                    for r in resized:
+                        ip_image.paste(r, (x, 0))
+                        x += r.width
+
+                logger.info(
+                    f"SDXL IP-Adapter: Generating scene with {len(reference_images)} "
+                    f"reference(s) (scale={settings.SDXL_IP_ADAPTER_SCALE})"
+                )
+                result = self.pipe(
+                    prompt=full_prompt,
+                    negative_prompt=negative,
+                    ip_adapter_image=ip_image,
+                    num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
+                    height=768,
+                    width=1024,
+                ).images[0]
+            else:
+                logger.info("SDXL: Generating scene (no references)...")
+                result = self.pipe(
+                    prompt=full_prompt,
+                    negative_prompt=negative,
+                    ip_adapter_image=Image.new("RGB", (1024, 1024), (128, 128, 128)),
+                    num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
+                    height=768,
+                    width=1024,
+                ).images[0]
+
+            result.save(output_path)
+            logger.info(f"✓ SDXL: Saved scene to {output_path}")
+            return output_path
+        except Exception as e:
+            logger.exception(f"SDXL scene generation failed: {e}")
+            return None
+
+
 def get_image_generator() -> ImageGenerator:
     """Factory function to get the configured image generator backend.
 
@@ -568,11 +898,16 @@ def get_image_generator() -> ImageGenerator:
 
     if provider == "flux-kontext":
         return FluxKontextImageGenerator()
+    elif provider == "flux-klein":
+        return FluxKleinImageGenerator()
+    elif provider == "sdxl-ip-adapter":
+        return SDXLIPAdapterImageGenerator()
     elif provider == "gemini":
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY is required when IMAGE_PROVIDER='gemini'.")
         return GeminiImageGenerator(api_key=settings.GOOGLE_API_KEY)
     else:
         raise ValueError(
-            f"Invalid IMAGE_PROVIDER: {provider}. Must be 'flux-kontext', or 'gemini'"
+            f"Invalid IMAGE_PROVIDER: {provider}. "
+            f"Must be 'flux-kontext', 'flux-klein', 'sdxl-ip-adapter', or 'gemini'"
         )

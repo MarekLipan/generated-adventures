@@ -15,10 +15,19 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
 
     # Image generation backend configuration
-    # - "flux-kontext": FREE, fully local. Open-weights FLUX.1 Kontext [dev] model
-    #   that keeps characters/objects consistent across scenes via reference images.
-    # - "gemini": cloud API (requires GOOGLE_API_KEY).
-    IMAGE_PROVIDER: Literal["flux-kontext", "gemini"] = "flux-kontext"
+    # - "flux-kontext":    FREE, fully local. FLUX.1 Kontext [dev] 12B. Single stitched
+    #                      reference image for multi-character scenes. 30 steps.
+    # - "flux-klein":      FREE, fully local. FLUX.2 Klein [9B or 4B]. Native list of
+    #                      reference images — no stitching. 9B distilled runs in 4 steps.
+    # - "sdxl-ip-adapter": FREE, fully local. SDXL + IP-Adapter. Style-level consistency only.
+    # - "gemini":          Cloud API (requires GOOGLE_API_KEY).
+    IMAGE_PROVIDER: Literal["flux-kontext", "flux-klein", "sdxl-ip-adapter", "gemini"] = "flux-kontext"
+
+    # SDXL + IP-Adapter settings
+    SDXL_MODEL: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    # IP-Adapter scale: 0.0 = ignore reference, 1.0 = copy reference
+    # 0.6 balances prompt creativity with reference style fidelity
+    SDXL_IP_ADAPTER_SCALE: float = 0.6
 
     # FLUX Kontext settings (for flux-kontext backend)
     # Open-weights image model with native character/object consistency.
@@ -48,8 +57,16 @@ class Settings(BaseSettings):
     # Requires: pip install optimum-quanto
     IMAGE_QUANTIZATION: Literal["none", "int8", "int4"] = "none"
 
+    # FLUX.2 Klein settings (for flux-klein backend)
+    # Distilled successor to FLUX.1 Kontext with native multi-image reference support.
+    # 9B distilled: 4 steps, guidance ~3.5. 4B base: ~50 steps, guidance ~3.5.
+    FLUX_KLEIN_MODEL: str = "black-forest-labs/FLUX.2-klein-9B"
+    FLUX_KLEIN_GUIDANCE_SCALE: float = 3.5
+    # 4 for 9B distilled model; set to 50 if using 4B base (non-distilled).
+    FLUX_KLEIN_NUM_INFERENCE_STEPS: int = 4
+
     # Generation parameters
-    IMAGE_NUM_INFERENCE_STEPS: int = 30  # Lower = faster, higher = better quality
+    IMAGE_NUM_INFERENCE_STEPS: int = 30  # Used by flux-kontext and sdxl backends
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
