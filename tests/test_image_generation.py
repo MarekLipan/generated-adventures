@@ -451,80 +451,6 @@ def test_klein_multi_character():
     return result
 
 
-def test_ip_adapter_comparison():
-    """Side-by-side comparison: SDXL + IP-Adapter vs FLUX Kontext.
-
-    Reuses the three FLUX portraits from test 5 as reference images so both
-    backends see identical inputs.  Generates the same party battle scene with
-    each backend and saves both results for direct visual comparison.
-
-    Run test 5 first to create the portrait files, then run this test.
-    """
-    logger.info("\n" + "=" * 60)
-    logger.info("🔬 IP-ADAPTER vs FLUX KONTEXT COMPARISON")
-    logger.info("=" * 60)
-
-    portraits = [m["portrait_path"] for m in PARTY]
-    missing = [p for p in portraits if not p.exists()]
-    if missing:
-        logger.error(
-            f"❌ Missing portrait(s): {[p.name for p in missing]}\n"
-            "   Run test 5 first to generate the party portraits."
-        )
-        return None
-
-    scene_prompt = PARTY_SCENE_PROMPT
-
-    results = {}
-
-    # ── FLUX Kontext scene (reuse existing generator if possible) ──────────────
-    logger.info("\n  [1/2] Generating scene with FLUX Kontext (party grid reference)...")
-    flux_path = TEST_OUTPUT_DIR / "comparison_flux_kontext.png"
-    try:
-        flux_gen = get_image_generator()  # uses IMAGE_PROVIDER from .env
-        result = flux_gen.generate_scene_image(
-            prompt=scene_prompt,
-            output_path=flux_path,
-            reference_images=portraits,
-        )
-        if result:
-            results["flux-kontext"] = flux_path
-            logger.info(f"  ✓ FLUX Kontext → {flux_path.name}")
-        else:
-            logger.warning("  ⚠  FLUX Kontext scene generation failed")
-    except Exception as e:
-        logger.warning(f"  ⚠  FLUX Kontext failed: {e}")
-
-    # ── SDXL + IP-Adapter scene ────────────────────────────────────────────────
-    logger.info("\n  [2/2] Generating scene with SDXL + IP-Adapter...")
-    sdxl_path = TEST_OUTPUT_DIR / "comparison_sdxl_ip_adapter.png"
-    try:
-        from core.image_backends import SDXLIPAdapterImageGenerator
-        sdxl_gen = SDXLIPAdapterImageGenerator()
-        result = sdxl_gen.generate_scene_image(
-            prompt=scene_prompt,
-            output_path=sdxl_path,
-            reference_images=portraits,
-        )
-        if result:
-            results["sdxl-ip-adapter"] = sdxl_path
-            logger.info(f"  ✓ SDXL IP-Adapter → {sdxl_path.name}")
-        else:
-            logger.warning("  ⚠  SDXL IP-Adapter scene generation failed")
-    except Exception as e:
-        logger.warning(f"  ⚠  SDXL IP-Adapter failed: {e}")
-
-    if results:
-        logger.info("\n✅ Comparison complete — open both files side by side:")
-        for name, path in results.items():
-            logger.info(f"   {name:20s} → {path}")
-        logger.info("\n  Ask yourself:")
-        logger.info("  • Do the characters look like the portraits?")
-        logger.info("  • Which art style looks more like Hearthstone?")
-        logger.info("  • Is the quality difference acceptable for the game?")
-    return results
-
-
 # ── Main menu ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -553,12 +479,11 @@ def main():
     print("  4. All Tests (1+2+3)")
     print("  5. Party Composition + Action Scene  (grid reference)")
     print("  6. Two-Character Scene  ⭐ separate reference images, no grid")
-    print("  7. IP-Adapter vs FLUX Kontext comparison  (requires test 5 portraits)")
-    print("  8. FLUX.2 Klein — Portrait + Single-Character Scene  ⭐ quality vs speed")
-    print("  9. FLUX.2 Klein — Native Multi-Character Scene  ⭐ no stitching")
+    print("  7. FLUX.2 Klein — Portrait + Single-Character Scene  ⭐ quality vs speed")
+    print("  8. FLUX.2 Klein — Native Multi-Character Scene  ⭐ no stitching")
     print("  q. Quit")
 
-    choice = input("\nYour choice (1-9 or q): ").strip()
+    choice = input("\nYour choice (1-8 or q): ").strip()
 
     try:
         if choice == "1":
@@ -577,10 +502,8 @@ def main():
         elif choice == "6":
             test_two_character_scene()
         elif choice == "7":
-            test_ip_adapter_comparison()
-        elif choice == "8":
             test_klein_portrait_and_scene()
-        elif choice == "9":
+        elif choice == "8":
             test_klein_multi_character()
         elif choice.lower() == "q":
             print("Exiting.")

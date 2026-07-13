@@ -19,15 +19,8 @@ class Settings(BaseSettings):
     #                      reference image for multi-character scenes. 30 steps.
     # - "flux-klein":      FREE, fully local. FLUX.2 Klein [9B or 4B]. Native list of
     #                      reference images — no stitching. 9B distilled runs in 4 steps.
-    # - "sdxl-ip-adapter": FREE, fully local. SDXL + IP-Adapter. Style-level consistency only.
     # - "gemini":          Cloud API (requires GOOGLE_API_KEY).
-    IMAGE_PROVIDER: Literal["flux-kontext", "flux-klein", "sdxl-ip-adapter", "gemini"] = "flux-kontext"
-
-    # SDXL + IP-Adapter settings
-    SDXL_MODEL: str = "stabilityai/stable-diffusion-xl-base-1.0"
-    # IP-Adapter scale: 0.0 = ignore reference, 1.0 = copy reference
-    # 0.6 balances prompt creativity with reference style fidelity
-    SDXL_IP_ADAPTER_SCALE: float = 0.6
+    IMAGE_PROVIDER: Literal["flux-kontext", "flux-klein", "gemini"] = "flux-kontext"
 
     # FLUX Kontext settings (for flux-kontext backend)
     # Open-weights image model with native character/object consistency.
@@ -64,9 +57,18 @@ class Settings(BaseSettings):
     FLUX_KLEIN_GUIDANCE_SCALE: float = 3.5
     # 4 for 9B distilled model; set to 50 if using 4B base (non-distilled).
     FLUX_KLEIN_NUM_INFERENCE_STEPS: int = 4
+    # Edge length each reference image is resized to before being fed to Klein.
+    # Attention cost grows ~quadratically with this, and multiple references add
+    # up fast. CUDA has flash-attention so it stays bounded at 1024.
+    FLUX_KLEIN_REFERENCE_SIZE: int = 1024
+    # MPS has no flash-attention kernel, so the full attention matrix is
+    # materialized in one allocation. With a multi-character party, 1024px
+    # references OOM a 32 GB Mac (a single ~30 GB MTLBuffer); 512px fits with
+    # headroom. This smaller size is used automatically when running on MPS.
+    FLUX_KLEIN_MPS_REFERENCE_SIZE: int = 512
 
     # Generation parameters
-    IMAGE_NUM_INFERENCE_STEPS: int = 30  # Used by flux-kontext and sdxl backends
+    IMAGE_NUM_INFERENCE_STEPS: int = 30  # Used by flux-kontext backend
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"

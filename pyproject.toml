@@ -26,13 +26,21 @@ dependencies = [
     "optimum-quanto>=0.2.0",
 ]
 
-# torch comes from the PyTorch CUDA 12.6 wheel index.
+# On Windows, torch comes from the PyTorch CUDA 12.6 wheel index, and
 # torchvision uses the CPU wheel — the CUDA build has a broken _C extension
 # on Windows/Python 3.13 (torchvision::nms operator not found), but the CPU
 # build works fine since we only need it for InterpolationMode in transformers.
+#
+# On macOS (Apple Silicon) the PyTorch CUDA/CPU indexes have no wheels, so we
+# let torch/torchvision resolve from the default PyPI index, which ships
+# arm64 builds with Metal (MPS) acceleration.
 [tool.uv.sources]
-torch = { index = "pytorch-cu126" }
-torchvision = { index = "pytorch-cpu" }
+torch = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'win32'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -46,3 +54,8 @@ explicit = true
 
 [tool.setuptools]
 packages = ["core", "webapp"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

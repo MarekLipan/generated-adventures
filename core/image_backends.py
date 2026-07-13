@@ -592,12 +592,45 @@ class FluxKleinImageGenerator(ImageGenerator):
                 token=hf_token,
             )
 
+            # Runtime int8/int4 quantization via optimum-quanto.
+            # Klein 9B bfloat16 transformer is ~18 GB; int8 cuts it to ~9.5 GB so the
+            # full pipeline (~21 GB with T5) fits in 32 GB unified memory, enabling
+            # model-level CPU offload instead of slow sequential layer-paging.
+            quantized = settings.IMAGE_QUANTIZATION != "none"
+            if quantized:
+                try:
+                    from optimum.quanto import freeze, qint4, qint8, quantize
+
+                    weight_dtype = (
+                        qint8 if settings.IMAGE_QUANTIZATION == "int8" else qint4
+                    )
+                    logger.info(
+                        f"Quantizing Klein transformer to {settings.IMAGE_QUANTIZATION}..."
+                    )
+                    quantize(self.pipe.transformer, weights=weight_dtype)
+                    freeze(self.pipe.transformer)
+                    logger.info(
+                        f"✓ Klein transformer quantized to {settings.IMAGE_QUANTIZATION}"
+                    )
+                except ImportError:
+                    logger.warning(
+                        "optimum-quanto not installed — skipping quantization. "
+                        "Run: pip install optimum-quanto"
+                    )
+                    quantized = False
+
             self.cpu_offload_enabled = False
             if settings.IMAGE_ENABLE_CPU_OFFLOAD and self.device != "cpu":
                 try:
+                    # With int8 (~9.5 GB transformer), model-level offload is enough:
+                    # T5 moves to CPU after text encoding so peak MPS during the 4
+                    # denoising steps is just the quantized transformer + activations.
+                    # Without quantization, bfloat16 Klein (~18 GB) also uses model-level
+                    # offload (Klein only needs 4 steps so it's still faster than Kontext).
                     self.pipe.enable_model_cpu_offload(device=self.device)
                     self.cpu_offload_enabled = True
-                    logger.info("✓ Model CPU offload enabled")
+                    mode = "int8 model" if quantized else "bfloat16 model"
+                    logger.info(f"✓ Model CPU offload enabled ({mode})")
                 except Exception as offload_err:
                     logger.warning(
                         f"CPU offload unavailable ({offload_err}); "
@@ -678,13 +711,25 @@ class FluxKleinImageGenerator(ImageGenerator):
     ) -> Optional[pathlib.Path]:
         try:
             if reference_images:
+                # MPS has no flash-attention kernel and materializes the full
+                # attention matrix in one allocation, so multiple 1024px
+                # references OOM the GPU — use a smaller reference size there.
+                # CUDA stays at full size. Attention cost scales ~quadratically
+                # with this, so a smaller size cuts peak memory sharply.
+                ref_size = (
+                    settings.FLUX_KLEIN_MPS_REFERENCE_SIZE
+                    if self.device == "mps"
+                    else settings.FLUX_KLEIN_REFERENCE_SIZE
+                )
                 refs = []
                 for p in reference_images:
                     p = pathlib.Path(p)
                     if p.exists():
                         # Klein expects square-ish reference images.
                         refs.append(
-                            Image.open(p).convert("RGB").resize((1024, 1024), Image.LANCZOS)
+                            Image.open(p)
+                            .convert("RGB")
+                            .resize((ref_size, ref_size), Image.LANCZOS)
                         )
                     else:
                         logger.warning(f"Reference image not found: {p}")
@@ -731,158 +776,6 @@ class FluxKleinImageGenerator(ImageGenerator):
             return None
 
 
-class SDXLIPAdapterImageGenerator(ImageGenerator):
-    """Image generator using SDXL + IP-Adapter.
-
-    IP-Adapter encodes a reference image through CLIP's image encoder and injects
-    those features into the UNet's cross-attention layers.  This gives approximate
-    style/content consistency (same colour palette, general character vibe) without
-    the doubled attention cost of FLUX Kontext's latent-concatenation approach.
-
-    Trade-offs vs FLUX Kontext:
-    - Faster scene generation (fixed encoder overhead, not sequence doubling)
-    - Lower base image quality (SDXL ~3B vs FLUX 12B)
-    - Character consistency is style-level, not identity-level
-    """
-
-    # Same Hearthstone-style anchor as FLUX backend for fair comparison.
-    GAME_ART_STYLE = FluxKontextImageGenerator.GAME_ART_STYLE
-
-    def __init__(self):
-        try:
-            import torch
-            from diffusers import StableDiffusionXLPipeline
-
-            logger.info(f"Initializing SDXL + IP-Adapter: {settings.SDXL_MODEL}")
-
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"
-            logger.info(f"Using device: {self.device}")
-
-            self.pipe = StableDiffusionXLPipeline.from_pretrained(
-                settings.SDXL_MODEL,
-                torch_dtype=torch.float16,
-                variant="fp16",
-                use_safetensors=True,
-            )
-
-            self.pipe.load_ip_adapter(
-                "h94/IP-Adapter",
-                subfolder="sdxl_models",
-                weight_name="ip-adapter_sdxl.bin",
-            )
-            self.pipe.set_ip_adapter_scale(settings.SDXL_IP_ADAPTER_SCALE)
-
-            self.pipe.enable_model_cpu_offload()
-            logger.info("✓ SDXL + IP-Adapter pipeline ready")
-
-        except ImportError as e:
-            raise ImportError(
-                f"SDXL IP-Adapter backend requires diffusers and torch:\n"
-                f"  pip install diffusers torch transformers accelerate\n"
-                f"Error: {e}"
-            ) from e
-
-    def generate_character_image(
-        self,
-        prompt: str,
-        output_path: pathlib.Path,
-    ) -> Optional[pathlib.Path]:
-        """Generate a character portrait (text-only, no IP-Adapter reference)."""
-        try:
-            full_prompt = (
-                f"{prompt}. Full-body or 3/4 view character portrait, neutral background. "
-                f"{self.GAME_ART_STYLE}"
-            )
-            negative = (
-                "photorealistic, photograph, blurry, ugly, deformed, text, watermark, "
-                "signature, bad anatomy, extra limbs"
-            )
-            logger.info("SDXL: Generating character portrait...")
-            image = self.pipe(
-                prompt=full_prompt,
-                negative_prompt=negative,
-                num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
-                height=1024,
-                width=768,
-                ip_adapter_image=Image.new("RGB", (1024, 1024), (128, 128, 128)),
-            ).images[0]
-            image.save(output_path)
-            logger.info(f"✓ SDXL: Saved character portrait to {output_path}")
-            return output_path
-        except Exception as e:
-            logger.error(f"SDXL character generation failed: {e}")
-            return None
-
-    def generate_scene_image(
-        self,
-        prompt: str,
-        output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-    ) -> Optional[pathlib.Path]:
-        """Generate a scene. With references, IP-Adapter injects their style."""
-        try:
-            full_prompt = (
-                f"{prompt}. Wide cinematic composition, landscape orientation. "
-                f"{self.GAME_ART_STYLE}"
-            )
-            negative = (
-                "photorealistic, photograph, blurry, ugly, deformed, text, watermark, "
-                "signature, bad anatomy, extra limbs"
-            )
-
-            if reference_images:
-                # Stitch multiple reference images into one (same as FLUX approach)
-                # then use it as the IP-Adapter conditioning image.
-                from PIL import Image as PILImage
-                refs = [PILImage.open(p).convert("RGB") for p in reference_images]
-                if len(refs) == 1:
-                    ip_image = refs[0]
-                else:
-                    target_h = 512
-                    resized = [
-                        r.resize((int(r.width * target_h / r.height), target_h))
-                        for r in refs
-                    ]
-                    total_w = sum(r.width for r in resized)
-                    ip_image = PILImage.new("RGB", (total_w, target_h), (30, 30, 30))
-                    x = 0
-                    for r in resized:
-                        ip_image.paste(r, (x, 0))
-                        x += r.width
-
-                logger.info(
-                    f"SDXL IP-Adapter: Generating scene with {len(reference_images)} "
-                    f"reference(s) (scale={settings.SDXL_IP_ADAPTER_SCALE})"
-                )
-                result = self.pipe(
-                    prompt=full_prompt,
-                    negative_prompt=negative,
-                    ip_adapter_image=ip_image,
-                    num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
-                    height=768,
-                    width=1024,
-                ).images[0]
-            else:
-                logger.info("SDXL: Generating scene (no references)...")
-                result = self.pipe(
-                    prompt=full_prompt,
-                    negative_prompt=negative,
-                    ip_adapter_image=Image.new("RGB", (1024, 1024), (128, 128, 128)),
-                    num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
-                    height=768,
-                    width=1024,
-                ).images[0]
-
-            result.save(output_path)
-            logger.info(f"✓ SDXL: Saved scene to {output_path}")
-            return output_path
-        except Exception as e:
-            logger.exception(f"SDXL scene generation failed: {e}")
-            return None
-
-
 def get_image_generator() -> ImageGenerator:
     """Factory function to get the configured image generator backend.
 
@@ -900,8 +793,6 @@ def get_image_generator() -> ImageGenerator:
         return FluxKontextImageGenerator()
     elif provider == "flux-klein":
         return FluxKleinImageGenerator()
-    elif provider == "sdxl-ip-adapter":
-        return SDXLIPAdapterImageGenerator()
     elif provider == "gemini":
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY is required when IMAGE_PROVIDER='gemini'.")
@@ -909,5 +800,5 @@ def get_image_generator() -> ImageGenerator:
     else:
         raise ValueError(
             f"Invalid IMAGE_PROVIDER: {provider}. "
-            f"Must be 'flux-kontext', 'flux-klein', 'sdxl-ip-adapter', or 'gemini'"
+            f"Must be 'flux-kontext', 'flux-klein', or 'gemini'"
         )
