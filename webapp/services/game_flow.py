@@ -8,10 +8,20 @@ Purpose:
 
 from __future__ import annotations
 
+import pathlib
 from typing import List, Optional
 
 from core import game, generator, persistence
-from core.models import Character, Game, ScenarioTemplate, Scene  # type: ignore
+from core.models import (  # type: ignore
+    Character,
+    Game,
+    GeneratedArchetype,
+    ScenarioTemplate,
+    Scene,
+)
+
+# Where uploaded player photos are stored (served at /static/photos/...).
+PHOTO_DIR = pathlib.Path("webapp/static/photos")
 
 # --- Scenario management ----------------------------------------------------------
 
@@ -41,6 +51,11 @@ async def generate_new_scenario() -> ScenarioTemplate:  # type: ignore
 def select_scenario(game_id: str, scenario_id: str) -> None:
     """Select a scenario template for the game."""
     game.select_scenario_for_game(game_id, scenario_id)
+
+
+def set_art_style(game_id: str, art_style: str) -> None:
+    """Set the visual art style for the game."""
+    game.set_art_style(game_id, art_style)
 
 
 def get_scenario_for_game(game_id: str) -> Optional[ScenarioTemplate]:  # type: ignore
@@ -82,6 +97,61 @@ async def generate_characters(
 
 def add_character(game_id: str, character: Character) -> None:
     game.add_character_to_game(game_id, character)
+
+
+# --- Archetypes & photo-based heroes ----------------------------------------------
+
+
+async def generate_archetypes(
+    scenario_name: str,
+    scenario_details: str | None = None,
+    num_archetypes: int = 5,
+) -> List[GeneratedArchetype]:  # type: ignore
+    """Generate scenario-tailored hero archetypes for players to pick from."""
+    return await generator.generate_archetypes(
+        scenario_name=scenario_name,
+        scenario_details=scenario_details,
+        num_archetypes=num_archetypes,
+    )
+
+
+def save_player_photo(
+    game_id: str, player_index: int, content: bytes, suffix: str = ".jpg"
+) -> pathlib.Path:
+    """Persist an uploaded player photo and return its file path.
+
+    Stored under webapp/static/photos/<game_id>/player_<index>.<ext> so it is
+    both usable as a generation reference and servable to the UI.
+    """
+    game_photo_dir = PHOTO_DIR / game_id
+    game_photo_dir.mkdir(parents=True, exist_ok=True)
+    ext = suffix if suffix.startswith(".") else f".{suffix}"
+    photo_path = game_photo_dir / f"player_{player_index}{ext}"
+    photo_path.write_bytes(content)
+    return photo_path
+
+
+async def generate_hero(
+    game_id: str,
+    scenario_name: str,
+    archetype: GeneratedArchetype,  # type: ignore
+    art_style: str,
+    player_index: int,
+    scenario_details: str | None = None,
+    photo_path: pathlib.Path | None = None,
+    custom_name: str | None = None,
+) -> Character:  # type: ignore
+    """Generate a single hero (lore + portrait) from a chosen archetype."""
+    return await generator.generate_hero(
+        game_id=game_id,
+        scenario_name=scenario_name,
+        scenario_details=scenario_details,
+        archetype=archetype,
+        art_style=art_style,
+        player_index=player_index,
+        photo_path=photo_path,
+        custom_name=custom_name,
+    )
 
 
 # --- Scenes / Adventure Loop ------------------------------------------------------

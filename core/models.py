@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 GameStatus = Literal["ongoing", "completed", "failed"]
 PromptTypeEnum = Literal["dialogue", "action", "dice_check"]
 DiceType = Literal["d6", "d10"]
+ArtStyle = Literal["painterly_hero", "artstation_realism"]
 
 
 class Asset(BaseModel):
@@ -30,6 +31,10 @@ class Asset(BaseModel):
     )
     image_path: Optional[str] = Field(
         None, description="Path to the generated asset image"
+    )
+    assigned_voice: Optional[str] = Field(
+        None,
+        description="Kokoro voice id assigned to this NPC for narration, kept stable across scenes",
     )
 
 
@@ -156,6 +161,18 @@ class Character(BaseModel):
     image_path: Optional[str] = Field(
         None, description="Path to the character's generated portrait"
     )
+    archetype: Optional[str] = Field(
+        None,
+        description="Name of the scenario archetype this hero was built from (e.g. 'The Infiltrator')",
+    )
+    player_photo_path: Optional[str] = Field(
+        None,
+        description="Path to the player's uploaded profile photo used to shape this hero's likeness, if any",
+    )
+    assigned_voice: Optional[str] = Field(
+        None,
+        description="Kokoro voice id assigned to this character for narrated dialogue, kept stable across scenes",
+    )
 
 
 class PromptType(BaseModel):
@@ -274,6 +291,10 @@ class Game(BaseModel):
     scenario_id: Optional[str] = Field(
         None, description="ID of the ScenarioTemplate being played"
     )
+    art_style: ArtStyle = Field(
+        default="painterly_hero",
+        description="Visual art style for all generated imagery in this game",
+    )
     characters: List[Character] = []
     scenes: List[Scene] = []
     player_actions: List[str] = []
@@ -306,6 +327,64 @@ class GeneratedScenarioTemplate(BaseModel):
         ...,
         description="Key NPCs with short descriptions and relevance (2-4 paragraphs)",
     )
+
+
+class NarrationSegment(BaseModel):
+    """One contiguous chunk of a scene's narration, tagged with who voices it."""
+
+    speaker: str = Field(
+        ...,
+        description="Who voices this segment: 'Narrator' for descriptive prose, or the exact name of the character/NPC speaking the quoted dialogue.",
+    )
+    text: str = Field(
+        ...,
+        description="The text to be read aloud for this segment. For dialogue, the spoken words WITHOUT surrounding quotation marks. Preserve the scene's original wording.",
+    )
+    gender: Literal["male", "female", "unknown"] = Field(
+        default="unknown",
+        description="Apparent gender of the speaker (for voice casting). Use 'unknown' for the Narrator or when unclear.",
+    )
+
+
+class NarrationScript(BaseModel):
+    """An ordered breakdown of a scene into voiced narration segments."""
+
+    segments: List[NarrationSegment] = Field(
+        ...,
+        description="The scene split into ordered segments, alternating between Narrator prose and character dialogue, covering the whole scene in reading order.",
+    )
+
+
+class GeneratedArchetype(BaseModel):
+    """A scenario-tailored hero archetype offered to a player to pick from.
+
+    Kept deliberately light: this is a cheap text-only option shown as a card.
+    The expensive portrait and full lore are only generated after a player
+    commits to an archetype.
+    """
+
+    name: str = Field(
+        ...,
+        description="Evocative archetype title fitting the scenario (e.g. 'The Infiltrator', 'Storm-Warden')",
+    )
+    role: str = Field(
+        ...,
+        description="Short role/party-function label (e.g. 'Stealth & sabotage', 'Front-line bruiser', 'Arcane support')",
+    )
+    hook: str = Field(
+        ...,
+        description="One enticing sentence describing the fantasy of playing this archetype in this scenario",
+    )
+    concept: str = Field(
+        ...,
+        description="Visual concept for the portrait: costume, equipment, silhouette, and vibe (2-3 sentences). No facial features — those come from the player's photo when provided.",
+    )
+
+
+class GeneratedArchetypeList(BaseModel):
+    """A list of scenario-tailored archetypes for players to choose from."""
+
+    archetypes: List[GeneratedArchetype]
 
 
 class GeneratedCharacter(BaseModel):
@@ -523,6 +602,10 @@ class GeneratedScene(BaseModel):
     assets_present: List[AssetReference] = Field(
         default_factory=list,
         description="List of important NPCs and objects present in this scene. Include any significant characters or items that should have consistent visual representation. MUST reuse existing asset names when referring to already-introduced NPCs/objects.",
+    )
+    narration_segments: List[NarrationSegment] = Field(
+        default_factory=list,
+        description="The scene_text broken into ordered voiced-narration segments for a multi-voice audiobook. Descriptive prose -> speaker 'Narrator'; each piece of direct speech -> speaker = the exact name of the character/NPC saying it (dialogue text WITHOUT surrounding quotation marks), with a gender tag. Cover the ENTIRE scene_text in reading order, preserving wording. Do not invent new content.",
     )
     location_reference: Optional[LocationReference] = Field(
         None,

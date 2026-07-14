@@ -1,6 +1,5 @@
 """Recap display component for showing story summary and scene gallery."""
 
-import asyncio
 import logging
 
 from nicegui import ui
@@ -58,93 +57,11 @@ async def show_recap_dialog(game_state: models.Game, current_scene_index: int):
                 for summary in recap_response.scene_summaries
             }
 
-            # Generate voiceover - file is saved temporarily but not tracked in game state
-            from google import genai as genai_client
-            from google.genai import types as genai_types
-
-            from core.config import settings
-            from core.generator import VOICEOVER_DIR
-
-            def generate_recap_voiceover_sync():
-                """Generate voiceover for recap - saves temp file but doesn't persist reference."""
-                import wave
-
-                client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)
-                voiceover_dir = VOICEOVER_DIR / game_state.id
-                voiceover_dir.mkdir(parents=True, exist_ok=True)
-
-                # Use unique filename for recap
-                filename = f"recap_scene_{current_scene.id}.wav"
-                voiceover_file_path = voiceover_dir / filename
-
-                logger.info(f"Generating recap voiceover for scene {current_scene.id}")
-
-                narration_prompt = f"""You are an expert fantasy audiobook narrator and Dungeon Master bringing an adventure to life. 
-Read the following recap with appropriate emotion, pacing, and dramatic flair.
-
-NARRATION GUIDELINES:
-- Use a storytelling tone that draws listeners into the fantasy world
-- Vary your pacing: slow down for dramatic moments, speed up for action
-- Emphasize emotional content: excitement during discoveries, tension during danger
-- Add dramatic pauses where appropriate for impact
-- Convey the atmosphere: mysterious for intrigue, ominous for danger, warm for friendly encounters
-- Maintain energy and engagement throughout
-
-RECAP TO NARRATE:
-
-{recap_text}"""
-
-                try:
-                    config = genai_types.GenerateContentConfig(
-                        response_modalities=["AUDIO"],
-                        speech_config=genai_types.SpeechConfig(
-                            voice_config=genai_types.VoiceConfig(
-                                prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
-                                    voice_name="Algieba"
-                                )
-                            )
-                        ),
-                    )
-
-                    response = client.models.generate_content(
-                        model="models/gemini-2.5-flash-preview-tts",
-                        contents=narration_prompt,
-                        config=config,
-                    )
-
-                    if response and hasattr(response, "candidates"):
-                        for part in response.candidates[0].content.parts:
-                            if getattr(part, "inline_data", None) and getattr(
-                                part.inline_data, "data", None
-                            ):
-                                pcm_data = part.inline_data.data
-
-                                with wave.open(
-                                    str(voiceover_file_path), "wb"
-                                ) as wav_file:
-                                    wav_file.setnchannels(1)
-                                    wav_file.setsampwidth(2)
-                                    wav_file.setframerate(24000)
-                                    wav_file.writeframes(pcm_data)
-
-                                logger.info(
-                                    f"Saved temp recap voiceover at {voiceover_file_path}"
-                                )
-                                return voiceover_file_path
-
-                    logger.warning("No audio content in response for recap")
-                    return None
-
-                except Exception as e:
-                    logger.warning(f"Recap voiceover generation failed: {e}")
-                    return None
-
-            voiceover_file_path = await asyncio.to_thread(generate_recap_voiceover_sync)
-
-            # Handle exceptions
-            if isinstance(voiceover_file_path, Exception):
-                logger.error(f"Voiceover generation failed: {voiceover_file_path}")
-                voiceover_file_path = None
+            # Generate recap voiceover via the configured TTS backend (Kokoro local
+            # by default). File is saved temporarily but not tracked in game state.
+            voiceover_file_path = await generator.generate_recap_voiceover(
+                game_state.id, current_scene.id, recap_text
+            )
 
             # Convert to web path (keep in local variable, don't store in scene model)
             if voiceover_file_path:

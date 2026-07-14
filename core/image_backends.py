@@ -13,20 +13,115 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
+# --- Art styles -----------------------------------------------------------------
+# Named style anchors ("Hearthstone", "ArtStation") are far more effective than
+# adjective lists because FLUX has seen millions of labeled examples and can
+# reproduce the exact aesthetic on demand. Each game picks one of these; the
+# chosen suffix is appended to every prompt (portraits and scenes alike) so the
+# whole adventure shares one visual language.
+
+PAINTERLY_HERO_STYLE = (
+    "Hearthstone card art, World of Warcraft Blizzard Entertainment concept art, "
+    "vibrant saturated colors, hand-painted digital illustration, visible painterly "
+    "brushstrokes, exaggerated heroic proportions, chunky oversized armor and "
+    "weapons, bold clear silhouette with strong outline, warm inviting lighting, "
+    "bright warm face illumination, strong rim lighting separating figure from "
+    "background, whimsical light-hearted fantasy tone, no photorealism, no text, "
+    "no watermarks"
+)
+
+ARTSTATION_REALISM_STYLE = (
+    "highly detailed semi-realistic digital fantasy painting, ArtStation trending, "
+    "cinematic dramatic lighting, realistic materials and rendering, concept art, "
+    "intricate detail, lifelike faces, no text, no watermark"
+)
+
+ART_STYLES: dict[str, str] = {
+    "painterly_hero": PAINTERLY_HERO_STYLE,
+    "artstation_realism": ARTSTATION_REALISM_STYLE,
+}
+
+DEFAULT_ART_STYLE = "painterly_hero"
+
+
+def resolve_art_style(art_style: Optional[str]) -> Optional[str]:
+    """Map an art-style key to its prompt suffix.
+
+    Returns the suffix string for a known key, or None if `art_style` is None or
+    unrecognized (callers then fall back to their own default suffix).
+    """
+    if not art_style:
+        return None
+    return ART_STYLES.get(art_style.lower())
+
+
+def _filter_cloud_references(
+    reference_images: Optional[List[pathlib.Path]],
+) -> List[pathlib.Path]:
+    """Drop reference images before sending them to a CLOUD backend, unless allowed.
+
+    Player profile photos are sensitive; when ALLOW_CLOUD_IMAGE_UPLOAD is False
+    (default), a cloud image backend must not upload any reference image. Local
+    backends run on-device and must NOT call this.
+    """
+    refs = list(reference_images or [])
+    if refs and not settings.ALLOW_CLOUD_IMAGE_UPLOAD:
+        logger.warning(
+            "Cloud image backend: dropping %d reference image(s) to keep player "
+            "photos on-device (set ALLOW_CLOUD_IMAGE_UPLOAD=true to override).",
+            len(refs),
+        )
+        return []
+    return refs
+
+
+def _load_portrait_reference(path: pathlib.Path, max_side: int = 1024) -> "Image.Image":
+    """Load a photo reference for a character portrait.
+
+    Preserves aspect ratio (unlike scene references, which are squared) and caps
+    the longest side so facial detail survives while staying FLUX-friendly.
+    """
+    img = Image.open(path).convert("RGB")
+    scale = max_side / max(img.size)
+    if scale < 1:
+        img = img.resize(
+            (int(img.width * scale), int(img.height * scale)), Image.LANCZOS
+        )
+    return img
+
+
 class ImageGenerator(ABC):
     """Abstract base class for image generation backends."""
+
+    def _style_suffix(self, art_style: Optional[str]) -> str:
+        """Resolve the style suffix to append to prompts for a given style key.
+
+        Falls back to this backend's default GAME_ART_STYLE when the key is None
+        or unknown. Backends without a GAME_ART_STYLE attribute get an empty
+        suffix.
+        """
+        resolved = resolve_art_style(art_style)
+        if resolved is not None:
+            return resolved
+        return getattr(self, "GAME_ART_STYLE", "")
 
     @abstractmethod
     def generate_character_image(
         self,
         prompt: str,
         output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
         """Generate a character portrait image.
 
         Args:
             prompt: Detailed text prompt for image generation
             output_path: Where to save the generated image
+            reference_images: Optional reference images (e.g. a player's profile
+                photo) so the generated hero resembles the person/subject shown.
+            art_style: Optional art-style key ("painterly_hero",
+                "artstation_realism"); None uses the backend default.
 
         Returns:
             Path to saved image or None if generation failed
@@ -39,6 +134,7 @@ class ImageGenerator(ABC):
         prompt: str,
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
         """Generate a scene image with optional character references.
 
@@ -46,6 +142,8 @@ class ImageGenerator(ABC):
             prompt: Detailed text prompt for scene composition
             output_path: Where to save the generated image
             reference_images: Optional list of character/asset images for consistency
+            art_style: Optional art-style key ("painterly_hero",
+                "artstation_realism"); None uses the backend default.
 
         Returns:
             Path to saved image or None if generation failed
@@ -65,12 +163,30 @@ class GeminiImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
         """Generate character image using Gemini."""
         try:
+            from google.genai import types as genai_types  # type: ignore
+
+            suffix = self._style_suffix(art_style)
+            content_parts = [f"{prompt} {suffix}".strip()]
+
+            # Reference images (e.g. a player's profile photo) are only uploaded to
+            # this cloud backend when explicitly allowed; otherwise dropped.
+            for ref_path in _filter_cloud_references(reference_images):
+                ref_path = pathlib.Path(ref_path)
+                if ref_path.exists():
+                    content_parts.append(
+                        genai_types.Part.from_bytes(
+                            data=ref_path.read_bytes(), mime_type="image/png"
+                        )
+                    )
+
             response = self.client.models.generate_content(
                 model="gemini-2.5-flash-image-preview",
-                contents=[prompt],
+                contents=content_parts,
             )
 
             # Extract image from response
@@ -95,17 +211,20 @@ class GeminiImageGenerator(ImageGenerator):
         prompt: str,
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
         """Generate scene image with Gemini (supports reference images)."""
         from google.genai import types as genai_config  # type: ignore
         from google.genai import types as genai_types  # type: ignore
 
         try:
-            content_parts = [prompt]
+            suffix = self._style_suffix(art_style)
+            content_parts = [f"{prompt} {suffix}".strip()]
 
-            # Add reference images if provided (Gemini's strength)
-            if reference_images:
-                for ref_path in reference_images:
+            # Reference images are only uploaded to this cloud backend when allowed.
+            refs = _filter_cloud_references(reference_images)
+            if refs:
+                for ref_path in refs:
                     if ref_path.exists():
                         with open(ref_path, "rb") as f:
                             image_data = f.read()
@@ -114,7 +233,7 @@ class GeminiImageGenerator(ImageGenerator):
                                 data=image_data, mime_type="image/png"
                             )
                         )
-                logger.info(f"✓ Gemini: Using {len(reference_images)} reference images")
+                logger.info(f"✓ Gemini: Using {len(refs)} reference images")
 
             config = genai_config.GenerateContentConfig(
                 response_modalities=["image"],
@@ -160,20 +279,9 @@ class FluxKontextImageGenerator(ImageGenerator):
       single conditioning image (Kontext's recommended multi-reference approach).
     """
 
-    # Shared art-style anchor appended to every prompt so all images —
-    # portraits and scenes alike — share the same visual language.
-    # Named style anchors ("Hearthstone", "World of Warcraft") are far more
-    # effective than adjective lists because FLUX has seen millions of labeled
-    # examples and can reproduce the exact aesthetic on demand.
-    GAME_ART_STYLE = (
-        "Hearthstone card art, World of Warcraft Blizzard Entertainment concept art, "
-        "vibrant saturated colors, hand-painted digital illustration, visible painterly "
-        "brushstrokes, exaggerated heroic proportions, chunky oversized armor and "
-        "weapons, bold clear silhouette with strong outline, warm inviting lighting, "
-        "bright warm face illumination, strong rim lighting separating figure from "
-        "background, whimsical light-hearted fantasy tone, no photorealism, no text, "
-        "no watermarks"
-    )
+    # Default art-style anchor (Painterly Hero). A per-game style can override
+    # this per call via the `art_style` argument on the generate_* methods.
+    GAME_ART_STYLE = PAINTERLY_HERO_STYLE
 
     def __init__(self):
         try:
@@ -453,18 +561,37 @@ class FluxKontextImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
-        """Generate a character portrait via text-to-image (no reference)."""
+        """Generate a character portrait.
+
+        With a reference image (e.g. a player's profile photo), Kontext keeps the
+        subject's likeness while restyling them as the described hero. Without
+        one, it's plain text-to-image.
+        """
         try:
+            suffix = self._style_suffix(art_style)
+            ref = None
+            if reference_images:
+                p = pathlib.Path(reference_images[0])
+                if p.exists():
+                    ref = _load_portrait_reference(p)
+                else:
+                    logger.warning(f"Reference image not found: {p}")
+
             enhanced_prompt = (
                 f"{self._shorten_prompt(prompt)} | "
                 f"full-body or 3/4 view character portrait, neutral background. "
-                f"{self.GAME_ART_STYLE}"
+                f"{suffix}"
             )
 
-            logger.info("FLUX Kontext: Generating character portrait...")
+            logger.info(
+                "FLUX Kontext: Generating character portrait%s...",
+                " from reference photo" if ref is not None else "",
+            )
 
-            image = self.pipe(
+            kwargs = dict(
                 prompt=enhanced_prompt,
                 guidance_scale=settings.FLUX_KONTEXT_GUIDANCE_SCALE,
                 num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
@@ -472,7 +599,10 @@ class FluxKontextImageGenerator(ImageGenerator):
                 width=768,
                 max_sequence_length=256,
                 generator=self._make_generator(),
-            ).images[0]
+            )
+            if ref is not None:
+                kwargs["image"] = ref
+            image = self.pipe(**kwargs).images[0]
 
             image.save(output_path)
             logger.info(f"✓ FLUX Kontext: Saved character image to {output_path}")
@@ -487,6 +617,7 @@ class FluxKontextImageGenerator(ImageGenerator):
         prompt: str,
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
         """Generate a scene image, keeping characters consistent via references.
 
@@ -499,6 +630,7 @@ class FluxKontextImageGenerator(ImageGenerator):
         a FLUX-friendly size (e.g. 1024×512 for two characters).
         """
         try:
+            suffix = self._style_suffix(art_style)
             if reference_images:
                 SLOT = 512  # px per character slot — keeps total ref image compact
                 slots = [
@@ -522,7 +654,7 @@ class FluxKontextImageGenerator(ImageGenerator):
                     f"Keep all {n} reference character(s) consistent — same face, "
                     "hair, clothing and gear. "
                     f"{self._shorten_prompt(prompt)}. "
-                    f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
+                    f"Wide cinematic composition, landscape orientation. {suffix}"
                 )
                 logger.info(
                     f"FLUX Kontext: Generating scene with {n} reference image(s) "
@@ -541,7 +673,7 @@ class FluxKontextImageGenerator(ImageGenerator):
             else:
                 enhanced_prompt = (
                     f"{self._shorten_prompt(prompt)}. "
-                    f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
+                    f"Wide cinematic composition, landscape orientation. {suffix}"
                 )
                 logger.info("FLUX Kontext: Generating scene (no references)...")
                 result = self.pipe(
@@ -569,8 +701,13 @@ class FluxKleinImageGenerator(ImageGenerator):
     Key differences from FLUX.1 Kontext:
     - Native multi-image: pass image=[img1, img2, ...] directly, no stitching.
     - 9B distilled model runs in just 4 steps vs 30 for Kontext.
-    - Fits on RTX 3080 with CPU offload (BF16 ~18 GB paged through 10 GB VRAM).
-    - For best speed/VRAM: use GGUF Q4_K_M (~5.5 GB, full VRAM residency).
+
+    Memory strategy (both the 9B transformer and Qwen3-8B text encoder are large):
+    - On CUDA, quantize BOTH modules with bitsandbytes (FLUX_KLEIN_QUANTIZATION,
+      default "nf4") so model-level CPU offload keeps the active module resident
+      — ~12-20 s/image on a 10 GB RTX 3080 at bf16-equivalent quality.
+    - Otherwise (MPS, or bitsandbytes unavailable) fall back to a bf16 pipeline
+      with model-level offload where a module fits, else sequential offload.
     """
 
     GAME_ART_STYLE = FluxKontextImageGenerator.GAME_ART_STYLE
@@ -586,51 +723,71 @@ class FluxKleinImageGenerator(ImageGenerator):
             self.torch_dtype = torch.float32 if self.device == "cpu" else torch.bfloat16
 
             hf_token = settings.HUGGING_FACE_HUB_TOKEN or None
+            self.cpu_offload_enabled = False
+
+            # Fast path: bitsandbytes-quantized transformer + text encoder on CUDA.
+            # Both modules are loaded already quantized, so model-level CPU offload
+            # only ever moves a small (~5 GB) module onto the GPU — no crash, and the
+            # active module stays resident during compute (bitsandbytes has fast 4-bit
+            # CUDA kernels, unlike GGUF/quanto on this build).
+            klein_quant = settings.FLUX_KLEIN_QUANTIZATION.lower()
+            use_bnb = self.device == "cuda" and klein_quant in ("nf4", "int8")
+            if use_bnb:
+                try:
+                    self.pipe = self._load_bnb_pipeline(
+                        Flux2KleinPipeline, klein_quant, hf_token
+                    )
+                    self.pipe.enable_model_cpu_offload(device=self.device)
+                    self.cpu_offload_enabled = True
+                    logger.info(
+                        f"✓ Klein loaded via bitsandbytes ({klein_quant}) "
+                        "with model CPU offload"
+                    )
+                except Exception as bnb_err:
+                    logger.warning(
+                        f"bitsandbytes quantization unavailable ({bnb_err}); "
+                        "falling back to bfloat16 pipeline"
+                    )
+                    use_bnb = False
+
+            if use_bnb:
+                # Quantized pipeline is fully configured above; skip the bf16 path.
+                self._finalize_vae()
+                logger.info("✓ FLUX.2 Klein pipeline ready")
+                return
+
+            # Fallback path: full bfloat16 pipeline with CPU offload.
             self.pipe = Flux2KleinPipeline.from_pretrained(
                 settings.FLUX_KLEIN_MODEL,
                 torch_dtype=self.torch_dtype,
                 token=hf_token,
             )
 
-            # Runtime int8/int4 quantization via optimum-quanto.
-            # Klein 9B bfloat16 transformer is ~18 GB; int8 cuts it to ~9.5 GB so the
-            # full pipeline (~21 GB with T5) fits in 32 GB unified memory, enabling
-            # model-level CPU offload instead of slow sequential layer-paging.
-            quantized = settings.IMAGE_QUANTIZATION != "none"
-            if quantized:
-                try:
-                    from optimum.quanto import freeze, qint4, qint8, quantize
-
-                    weight_dtype = (
-                        qint8 if settings.IMAGE_QUANTIZATION == "int8" else qint4
-                    )
-                    logger.info(
-                        f"Quantizing Klein transformer to {settings.IMAGE_QUANTIZATION}..."
-                    )
-                    quantize(self.pipe.transformer, weights=weight_dtype)
-                    freeze(self.pipe.transformer)
-                    logger.info(
-                        f"✓ Klein transformer quantized to {settings.IMAGE_QUANTIZATION}"
-                    )
-                except ImportError:
-                    logger.warning(
-                        "optimum-quanto not installed — skipping quantization. "
-                        "Run: pip install optimum-quanto"
-                    )
-                    quantized = False
-
-            self.cpu_offload_enabled = False
             if settings.IMAGE_ENABLE_CPU_OFFLOAD and self.device != "cpu":
                 try:
-                    # With int8 (~9.5 GB transformer), model-level offload is enough:
-                    # T5 moves to CPU after text encoding so peak MPS during the 4
-                    # denoising steps is just the quantized transformer + activations.
-                    # Without quantization, bfloat16 Klein (~18 GB) also uses model-level
-                    # offload (Klein only needs 4 steps so it's still faster than Kontext).
-                    self.pipe.enable_model_cpu_offload(device=self.device)
+                    # bfloat16 Klein loads TWO oversized modules: the 9B transformer
+                    # (~18 GB) and a Qwen3-8B text encoder (~16 GB). model-level offload
+                    # moves whole modules onto the GPU one at a time, so it only works
+                    # when a single module fits in VRAM. On a small card neither does:
+                    # the giant .to() device move overcommits VRAM and hard-crashes
+                    # (Windows access violation). enable_sequential_cpu_offload() pages
+                    # weights at the layer level, running on ~2 GB VRAM (slower per
+                    # step, but Klein needs only 4 steps). For fast generation on a
+                    # small card, prefer FLUX_KLEIN_QUANTIZATION=nf4 (the CUDA path
+                    # above) over this bf16 fallback.
+                    vram_gb = self._device_vram_gb()
+                    fits_whole_module = vram_gb is None or vram_gb >= 21.0
+
+                    if not fits_whole_module:
+                        self.pipe.enable_sequential_cpu_offload(device=self.device)
+                        logger.info(
+                            f"✓ Sequential CPU offload enabled (bfloat16; VRAM "
+                            f"{vram_gb:.0f} GB too small for whole-module offload)"
+                        )
+                    else:
+                        self.pipe.enable_model_cpu_offload(device=self.device)
+                        logger.info("✓ Model CPU offload enabled (bfloat16 model)")
                     self.cpu_offload_enabled = True
-                    mode = "int8 model" if quantized else "bfloat16 model"
-                    logger.info(f"✓ Model CPU offload enabled ({mode})")
                 except Exception as offload_err:
                     logger.warning(
                         f"CPU offload unavailable ({offload_err}); "
@@ -640,13 +797,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             else:
                 self.pipe = self.pipe.to(self.device)
 
-            try:
-                self.pipe.vae.enable_slicing()
-                if self.device != "mps":
-                    self.pipe.vae.enable_tiling()
-            except Exception:
-                pass
-
+            self._finalize_vae()
             logger.info("✓ FLUX.2 Klein pipeline ready")
 
         except ImportError as e:
@@ -655,6 +806,81 @@ class FluxKleinImageGenerator(ImageGenerator):
                 "  pip install -U diffusers\n"
                 f"Error: {e}"
             ) from e
+
+    def _load_bnb_pipeline(self, pipeline_cls, klein_quant: str, hf_token):
+        """Load Klein with bitsandbytes-quantized transformer + text encoder.
+
+        Both large modules are quantized on load so that model-level CPU offload
+        only ever moves a small (~5 GB) module onto the GPU. The transformer is
+        loaded and quantized to the GPU first so its host-RAM copy is freed before
+        the 16 GB text encoder loads (avoids OOM on a 32 GB machine).
+        """
+        import gc
+
+        import torch
+        from diffusers import BitsAndBytesConfig as DiffusersBnbConfig
+        from diffusers import Flux2Transformer2DModel
+        from transformers import AutoModel
+        from transformers import BitsAndBytesConfig as TransformersBnbConfig
+
+        load_in_4bit = klein_quant == "nf4"
+
+        def _diffusers_cfg():
+            if load_in_4bit:
+                return DiffusersBnbConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=self.torch_dtype,
+                )
+            return DiffusersBnbConfig(load_in_8bit=True)
+
+        def _transformers_cfg():
+            if load_in_4bit:
+                return TransformersBnbConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=self.torch_dtype,
+                )
+            return TransformersBnbConfig(load_in_8bit=True)
+
+        model = settings.FLUX_KLEIN_MODEL
+
+        logger.info(f"Loading Klein transformer ({klein_quant}) via bitsandbytes...")
+        transformer = Flux2Transformer2DModel.from_pretrained(
+            model,
+            subfolder="transformer",
+            quantization_config=_diffusers_cfg(),
+            torch_dtype=self.torch_dtype,
+            token=hf_token,
+        )
+        gc.collect()
+
+        logger.info(f"Loading Klein text encoder ({klein_quant}) via bitsandbytes...")
+        text_encoder = AutoModel.from_pretrained(
+            model,
+            subfolder="text_encoder",
+            quantization_config=_transformers_cfg(),
+            torch_dtype=self.torch_dtype,
+            token=hf_token,
+        )
+        gc.collect()
+
+        return pipeline_cls.from_pretrained(
+            model,
+            transformer=transformer,
+            text_encoder=text_encoder,
+            torch_dtype=self.torch_dtype,
+            token=hf_token,
+        )
+
+    def _finalize_vae(self) -> None:
+        """Enable VAE slicing/tiling to reduce peak memory during decode."""
+        try:
+            self.pipe.vae.enable_slicing()
+            if self.device != "mps":
+                self.pipe.vae.enable_tiling()
+        except Exception:
+            pass
 
     def _get_device(self) -> str:
         import torch
@@ -677,25 +903,64 @@ class FluxKleinImageGenerator(ImageGenerator):
         except Exception:
             return torch.Generator()
 
+    def _device_vram_gb(self) -> Optional[float]:
+        """Total VRAM of the active accelerator in GB, or None if unknown.
+
+        Used to decide between model-level and sequential CPU offload. MPS shares
+        unified memory with the host, so there is no dedicated-VRAM figure to gate
+        on — return None there to keep the existing model-offload behaviour.
+        """
+        import torch
+
+        try:
+            if self.device == "cuda":
+                return torch.cuda.get_device_properties(0).total_memory / 1e9
+        except Exception:
+            pass
+        return None
+
     def generate_character_image(
         self,
         prompt: str,
         output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
+        """Generate a character portrait.
+
+        With a reference image (e.g. a player's profile photo), Klein keeps the
+        subject's likeness natively while restyling them as the described hero.
+        Without one, it's plain text-to-image.
+        """
         try:
+            suffix = self._style_suffix(art_style)
+            ref = None
+            if reference_images:
+                p = pathlib.Path(reference_images[0])
+                if p.exists():
+                    ref = _load_portrait_reference(p)
+                else:
+                    logger.warning(f"Reference image not found: {p}")
+
             enhanced_prompt = (
                 f"{prompt} | full-body or 3/4 view character portrait, neutral background. "
-                f"{self.GAME_ART_STYLE}"
+                f"{suffix}"
             )
-            logger.info("FLUX.2 Klein: Generating character portrait...")
-            image = self.pipe(
+            logger.info(
+                "FLUX.2 Klein: Generating character portrait%s...",
+                " from reference photo" if ref is not None else "",
+            )
+            kwargs = dict(
                 prompt=enhanced_prompt,
                 guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
                 num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
                 height=1024,
                 width=768,
                 generator=self._make_generator(),
-            ).images[0]
+            )
+            if ref is not None:
+                kwargs["image"] = [ref]
+            image = self.pipe(**kwargs).images[0]
             image.save(output_path)
             logger.info(f"✓ FLUX.2 Klein: Saved character image to {output_path}")
             return output_path
@@ -708,8 +973,10 @@ class FluxKleinImageGenerator(ImageGenerator):
         prompt: str,
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
     ) -> Optional[pathlib.Path]:
         try:
+            suffix = self._style_suffix(art_style)
             if reference_images:
                 # MPS has no flash-attention kernel and materializes the full
                 # attention matrix in one allocation, so multiple 1024px
@@ -738,7 +1005,7 @@ class FluxKleinImageGenerator(ImageGenerator):
                 enhanced_prompt = (
                     f"Keep all {n} reference character(s) consistent — same face, "
                     f"hair, clothing and gear. {prompt}. "
-                    f"Wide cinematic composition, landscape orientation. {self.GAME_ART_STYLE}"
+                    f"Wide cinematic composition, landscape orientation. {suffix}"
                 )
                 logger.info(
                     f"FLUX.2 Klein: Generating scene with {n} native reference image(s)..."
@@ -755,7 +1022,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             else:
                 enhanced_prompt = (
                     f"{prompt}. Wide cinematic composition, landscape orientation. "
-                    f"{self.GAME_ART_STYLE}"
+                    f"{suffix}"
                 )
                 logger.info("FLUX.2 Klein: Generating scene (no references)...")
                 result = self.pipe(
@@ -776,6 +1043,121 @@ class FluxKleinImageGenerator(ImageGenerator):
             return None
 
 
+class HttpImageGenerator(ImageGenerator):
+    """Client backend that offloads generation to a remote image server.
+
+    Talks to image_server.py (which hosts a warm local backend) over HTTP, so the
+    game process holds no model and no GPU. The server may run on this machine
+    (localhost) or another device on the LAN. Implements the same ImageGenerator
+    interface, so the rest of the app is unchanged.
+    """
+
+    def __init__(self, base_url: str, api_key: str = "", timeout: float = 300.0):
+        import httpx
+
+        self._httpx = httpx
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.headers = {"X-API-Key": api_key} if api_key else {}
+        logger.info(f"Using remote image server at {self.base_url}")
+
+    def _post(self, path: str, *, data: dict, files=None) -> Optional[bytes]:
+        try:
+            resp = self._httpx.post(
+                f"{self.base_url}{path}",
+                data=data,
+                files=files,
+                headers=self.headers,
+                timeout=self.timeout,
+            )
+            if resp.status_code != 200:
+                logger.error(
+                    f"Image server {path} returned {resp.status_code}: {resp.text[:200]}"
+                )
+                return None
+            return resp.content
+        except Exception as e:
+            logger.error(f"Image server request to {path} failed: {e}")
+            return None
+
+    def generate_character_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
+    ) -> Optional[pathlib.Path]:
+        data = {"prompt": prompt}
+        if art_style:
+            data["art_style"] = art_style
+
+        files = []
+        open_handles = []
+        try:
+            # Only the first reference (the player photo) drives a portrait.
+            for ref in (reference_images or [])[:1]:
+                ref = pathlib.Path(ref)
+                if not ref.exists():
+                    logger.warning(f"Reference image not found, skipping: {ref}")
+                    continue
+                fh = ref.open("rb")
+                open_handles.append(fh)
+                files.append(("photo", (ref.name, fh, "image/png")))
+
+            png = self._post(
+                "/generate/character",
+                data=data,
+                files=files or None,
+            )
+        finally:
+            for fh in open_handles:
+                fh.close()
+
+        if png is None:
+            return None
+        pathlib.Path(output_path).write_bytes(png)
+        logger.info(f"✓ HTTP: Saved character image to {output_path}")
+        return output_path
+
+    def generate_scene_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+        reference_images: Optional[List[pathlib.Path]] = None,
+        art_style: Optional[str] = None,
+    ) -> Optional[pathlib.Path]:
+        data = {"prompt": prompt}
+        if art_style:
+            data["art_style"] = art_style
+
+        files = []
+        open_handles = []
+        try:
+            for ref in reference_images or []:
+                ref = pathlib.Path(ref)
+                if not ref.exists():
+                    logger.warning(f"Reference image not found, skipping: {ref}")
+                    continue
+                fh = ref.open("rb")
+                open_handles.append(fh)
+                files.append(("references", (ref.name, fh, "image/png")))
+
+            png = self._post(
+                "/generate/scene",
+                data=data,
+                files=files or None,
+            )
+        finally:
+            for fh in open_handles:
+                fh.close()
+
+        if png is None:
+            return None
+        pathlib.Path(output_path).write_bytes(png)
+        logger.info(f"✓ HTTP: Saved scene image to {output_path}")
+        return output_path
+
+
 def get_image_generator() -> ImageGenerator:
     """Factory function to get the configured image generator backend.
 
@@ -793,6 +1175,12 @@ def get_image_generator() -> ImageGenerator:
         return FluxKontextImageGenerator()
     elif provider == "flux-klein":
         return FluxKleinImageGenerator()
+    elif provider == "http":
+        return HttpImageGenerator(
+            base_url=settings.IMAGE_SERVER_URL,
+            api_key=settings.IMAGE_SERVER_API_KEY,
+            timeout=settings.IMAGE_SERVER_TIMEOUT,
+        )
     elif provider == "gemini":
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY is required when IMAGE_PROVIDER='gemini'.")
@@ -800,5 +1188,18 @@ def get_image_generator() -> ImageGenerator:
     else:
         raise ValueError(
             f"Invalid IMAGE_PROVIDER: {provider}. "
-            f"Must be 'flux-kontext', 'flux-klein', or 'gemini'"
+            f"Must be 'flux-kontext', 'flux-klein', 'http', or 'gemini'"
         )
+
+
+def _local_backend_for_server() -> ImageGenerator:
+    """Instantiate the local backend the image server should host.
+
+    The server can't use provider 'http' (that would point at itself), so it maps
+    'http' to the recommended local backend and otherwise honors IMAGE_PROVIDER.
+    """
+    provider = settings.IMAGE_PROVIDER.lower()
+    if provider == "http":
+        logger.info("IMAGE_PROVIDER='http' on the server; hosting 'flux-klein'.")
+        return FluxKleinImageGenerator()
+    return get_image_generator()

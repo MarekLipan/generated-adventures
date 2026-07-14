@@ -14,6 +14,7 @@ dependencies = [
     "google-generativeai>=0.7.2",
     "Pillow>=10.5.0",
     "reportlab>=4.0.0",
+    "httpx>=0.27.0",
     "diffusers>=0.35.0",
     "torch>=2.7.0",
     "torchvision>=0.22.0",
@@ -24,6 +25,12 @@ dependencies = [
     "protobuf>=5.29.5",
     "gguf>=0.10.0",
     "optimum-quanto>=0.2.0",
+    # 4-bit/8-bit quantization for the FLUX.2 Klein CUDA backend. No macOS wheels
+    # (CUDA/Linux/Windows only); the Klein bnb path is guarded to CUDA anyway.
+    "bitsandbytes>=0.48.0; sys_platform != 'darwin'",
+    # Local text-to-speech for scene narration (Kokoro-82M via onnxruntime, CPU).
+    # Runs off the GPU, so narration generates in parallel with image generation.
+    "kokoro-onnx>=0.4.0",
 ]
 
 # On Windows, torch comes from the PyTorch CUDA 12.6 wheel index, and

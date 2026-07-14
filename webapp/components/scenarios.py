@@ -6,7 +6,7 @@ from nicegui import ui
 from webapp.services import game_flow  # type: ignore
 from webapp.utils import show_api_error, show_loading  # type: ignore
 
-from .characters import show_characters  # type: ignore
+from .hero_creation import start_hero_creation  # type: ignore
 
 logger = logging.getLogger()
 
@@ -117,6 +117,6 @@ async def handle_scenario_selection(main_container, game_id: str, scenario_id: s
         ui.notify("Error loading scenario", type="negative")
         return
 
-    # Go directly to character selection
-    logger.info("Proceeding to character selection")
-    await show_characters(main_container, game_id, scenario.name)
+    # Proceed to art-style choice and photo-based hero creation
+    logger.info("Proceeding to hero creation")
+    await start_hero_creation(main_container, game_id, scenario.name)

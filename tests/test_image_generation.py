@@ -25,6 +25,16 @@ import logging
 import pathlib
 import sys
 
+# On Windows the console defaults to a legacy code page (cp1252) that cannot
+# encode the emoji used in the log/print output, which would crash the script
+# with UnicodeEncodeError before any generation runs. Force UTF-8 on the
+# standard streams so the suite runs identically across platforms.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 # Ensure the project root is on the path when running this script directly.
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 

@@ -51,6 +51,13 @@ def select_scenario_for_game(game_id: str, scenario_id: str):
         persistence.save_game(games[game_id])
 
 
+def set_art_style(game_id: str, art_style: str):
+    """Set the visual art style for all generated imagery in this game."""
+    if game_id in games:
+        games[game_id].art_style = art_style
+        persistence.save_game(games[game_id])
+
+
 def add_character_to_game(game_id: str, character: Character):
     """Adds a new character to the game state."""
     if game_id in games:
@@ -126,6 +133,7 @@ async def generate_opening_scene(game_id: str):
         game.characters,
         game.assets,
         game.locations,
+        art_style=game.art_style,
     )
     game.scenes.append(opening_scene)
     game.characters = updated_characters  # Update character states
@@ -207,6 +215,7 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         conversation_history=conversation_history,
         existing_assets=game_state.assets,
         existing_locations=game_state.locations,
+        art_style=game_state.art_style,
     )
     game_state.scenes.append(next_scene)
     game_state.characters = updated_characters  # Update character states

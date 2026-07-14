@@ -8,35 +8,36 @@ these with real model calls (Gemini, OpenAI, etc.) later.
 import asyncio
 import logging
 import pathlib
-import wave
-from io import BytesIO
 from typing import Callable, List, Optional
 
-from google import genai as genai_client  # type: ignore
-from google.genai import types as genai_types  # type: ignore
 from google.genai.errors import ClientError, ServerError  # type: ignore
-from PIL import Image
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 from .config import settings
 from .image_backends import ImageGenerator, get_image_generator
+from .tts_backends import TTSGenerator, get_tts_generator
 from .models import (
     Asset,
     Character,
     GameStatus,
+    GeneratedArchetype,
+    GeneratedArchetypeList,
+    GeneratedCharacter,
     GeneratedCharacterList,
     GeneratedLocationList,
     GeneratedScenarioTemplate,
     GeneratedScene,
     Location,
     LocationReference,
+    NarrationSegment,
     RecapResponse,
     ScenarioTemplate,
     Scene,
     SceneSummary,
 )
+from . import voice_casting
 
 logger = logging.getLogger()  # Use root logger so Uvicorn/NiceGUI picks up logs
 logger.setLevel(logging.INFO)
@@ -63,6 +64,53 @@ def _get_image_generator() -> ImageGenerator:
     if _image_generator is None:
         _image_generator = get_image_generator()
     return _image_generator
+
+
+def _get_text_model():
+    """Build the pydantic-ai text model for the configured LLM_PROVIDER.
+
+    - "gemini": Google Gemini (GoogleModel + GoogleProvider), model LLM_MODEL.
+    - "ollama"/"openai-compatible": any OpenAI-compatible endpoint via LLM_BASE_URL.
+
+    Centralizing this lets every generation call switch providers from config with
+    no code change, and keeps the model id (e.g. gemini-3.1-flash-lite) in one place.
+    """
+    provider = settings.LLM_PROVIDER.lower()
+    if provider == "gemini":
+        return GoogleModel(
+            settings.LLM_MODEL,
+            provider=GoogleProvider(api_key=settings.GOOGLE_API_KEY),
+        )
+
+    # OpenAI-compatible local servers (Ollama, llama.cpp, LM Studio).
+    from pydantic_ai.models.openai import OpenAIModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    return OpenAIModel(
+        settings.LLM_MODEL,
+        provider=OpenAIProvider(
+            base_url=settings.LLM_BASE_URL, api_key=settings.LLM_API_KEY
+        ),
+    )
+
+
+# Lazy TTS generator singleton. `_UNSET` distinguishes "not built yet" from a
+# cached None (TTS disabled or failed to initialize — narration is optional, so
+# we don't retry every scene).
+_UNSET = object()
+_tts_generator: object = _UNSET
+
+
+def _get_tts_generator() -> Optional[TTSGenerator]:
+    """Get or initialize the TTS generator singleton (None if unavailable)."""
+    global _tts_generator
+    if _tts_generator is _UNSET:
+        try:
+            _tts_generator = get_tts_generator()
+        except Exception as e:
+            logger.error(f"TTS initialization failed ({e}); narration disabled")
+            _tts_generator = None
+    return _tts_generator  # type: ignore[return-value]
 
 
 VOICEOVER_DIR = pathlib.Path("webapp/static/voiceovers")
@@ -196,6 +244,7 @@ def _generate_scene_image_sync(
     game_status: GameStatus = "ongoing",
     assets: dict[str, Asset] = None,
     visible_asset_ids: List[str] = None,
+    art_style: Optional[str] = None,
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
 
@@ -253,104 +302,125 @@ def _generate_scene_image_sync(
     filename = f"scene_{scene_id:03d}.png"
     output_path = scene_dir / filename
 
-    # Generate using backend (only Gemini supports reference images)
+    # Generate using backend
     image_file_path = generator.generate_scene_image(
         prompt=prompt_text,
         output_path=output_path,
         reference_images=reference_images if reference_images else None,
+        art_style=art_style,
     )
 
     return image_file_path
 
 
-def _generate_scene_voiceover_sync(
-    client,
+def _resolve_segment_voices(
+    narration_segments: List["NarrationSegment"],
+    characters: List[Character],
+    assets: dict[str, Asset],
+) -> list:
+    """Map narration segments to (voice_id, text), casting/persisting speaker voices.
+
+    Narrator uses the configured default voice. Party members and NPCs get a stable
+    voice stored on their object (persisted across scenes). Minor unnamed speakers
+    get a deterministic voice by name (no persistence needed).
+    """
+    narrator = settings.KOKORO_VOICE
+    taken = set(
+        filter(
+            None,
+            [c.assigned_voice for c in characters]
+            + [a.assigned_voice for a in assets.values()],
+        )
+    )
+
+    def match(name: str):
+        key = name.strip().lower()
+        for c in characters:
+            cn = c.name.lower()
+            if key == cn or key in cn.split():
+                return c
+        for a in assets.values():
+            an = a.name.lower()
+            if key == an or key in an.split():
+                return a
+        return None
+
+    segments = []
+    for seg in narration_segments:
+        key = seg.speaker.strip().lower()
+        if key in ("", "narrator", "dm", "the narrator", "narration"):
+            segments.append((narrator, seg.text))
+            continue
+
+        obj = match(seg.speaker)
+        if obj is not None:
+            if not obj.assigned_voice:
+                obj.assigned_voice = voice_casting.cast_voice(
+                    obj.name, seg.gender, taken=taken, exclude=narrator
+                )
+                taken.add(obj.assigned_voice)
+            segments.append((obj.assigned_voice, seg.text))
+        else:
+            # Minor / unknown speaker: deterministic by name, not persisted.
+            voice = voice_casting.cast_voice(
+                seg.speaker, seg.gender, taken=taken, exclude=narrator
+            )
+            segments.append((voice, seg.text))
+    return segments
+
+
+async def _generate_scene_voiceover(
     game_id: str,
     scene_id: int,
     scene_text: str,
+    characters: List[Character],
+    assets: dict[str, Asset],
+    narration_segments: Optional[List["NarrationSegment"]] = None,
 ) -> pathlib.Path | None:
-    """Synchronous helper to generate a scene voiceover narration using Gemini TTS.
+    """Generate scene narration via the configured TTS backend.
 
-    Args:
-        client: Google GenAI client
-        game_id: Game identifier for directory structure
-        scene_id: Scene number
-        scene_text: The narrative text of the scene to narrate
-
-    Returns:
-        Path to saved voiceover WAV file or None if generation failed
+    Uses the per-speaker `narration_segments` emitted by the scene model (multi-voice)
+    when available on a multi-voice backend; otherwise reads the whole scene in the
+    single narrator voice. Narration is optional: returns None (never raises) if
+    unavailable or failing.
     """
-    # Create voiceover directory for this game
+    tts = _get_tts_generator()
+    if tts is None:
+        return None
+
     voiceover_dir = VOICEOVER_DIR / game_id
     voiceover_dir.mkdir(parents=True, exist_ok=True)
-
-    filename = f"scene_{scene_id:03d}.wav"
-    voiceover_file_path = voiceover_dir / filename
+    voiceover_file_path = voiceover_dir / f"scene_{scene_id:03d}.wav"
 
     logger.info(f"Generating voiceover for scene {scene_id} in game {game_id}")
 
-    # Build enhanced prompt with narration guidance
-    narration_prompt = f"""You are an expert fantasy audiobook narrator and Dungeon Master bringing an adventure to life. 
-Read the following scene with appropriate emotion, pacing, and dramatic flair.
+    # Single-voice backend, multi-voice disabled, or no segments: read as narrator.
+    if not getattr(tts, "supports_multivoice", False) or not narration_segments:
+        return await asyncio.to_thread(tts.synthesize, scene_text, voiceover_file_path)
 
-NARRATION GUIDELINES:
-- Use a storytelling tone that draws listeners into the fantasy world
-- Vary your pacing: slow down for dramatic moments, speed up for action
-- Emphasize emotional content: excitement during discoveries, tension during danger, solemnity for serious moments
-- Add dramatic pauses where appropriate for impact (use natural speech rhythm)
-- Convey the atmosphere: mysterious for intrigue, ominous for danger, warm for friendly encounters
-- When describing dialogue or character actions, subtly shift tone to match the character's personality
-- Build tension gradually in suspenseful moments
-- Express wonder and awe for magical or epic descriptions
-- Maintain energy and engagement throughout - avoid monotone delivery
+    segments = _resolve_segment_voices(narration_segments, characters, assets)
+    if not segments:
+        return await asyncio.to_thread(tts.synthesize, scene_text, voiceover_file_path)
+    return await asyncio.to_thread(
+        tts.synthesize_segments, segments, voiceover_file_path
+    )
 
-SCENE TO NARRATE:
 
-{scene_text}"""
+async def generate_recap_voiceover(
+    game_id: str, scene_id: int, recap_text: str
+) -> pathlib.Path | None:
+    """Narrate a story recap via the configured TTS backend (single narrator voice).
 
-    try:
-        config = genai_types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=genai_types.SpeechConfig(
-                voice_config=genai_types.VoiceConfig(
-                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
-                        voice_name="Algieba"
-                    )
-                )
-            ),
-        )
-
-        response = client.models.generate_content(
-            model="models/gemini-2.5-flash-preview-tts",
-            contents=narration_prompt,
-            config=config,
-        )
-
-        # Extract PCM audio data from response and save as WAV
-        if response and hasattr(response, "candidates"):
-            for part in response.candidates[0].content.parts:  # type: ignore[index]
-                if getattr(part, "inline_data", None) and getattr(
-                    part.inline_data, "data", None
-                ):
-                    # Convert PCM data to WAV format
-                    pcm_data = part.inline_data.data
-
-                    # Save as WAV with proper headers (24kHz, 16-bit, mono)
-                    with wave.open(str(voiceover_file_path), "wb") as wav_file:
-                        wav_file.setnchannels(1)  # mono
-                        wav_file.setsampwidth(2)  # 16-bit = 2 bytes
-                        wav_file.setframerate(24000)  # 24kHz sample rate
-                        wav_file.writeframes(pcm_data)
-
-                    logger.info(f"Saved voiceover at {voiceover_file_path}")
-                    return voiceover_file_path
-
-        logger.warning(f"No audio content in response for scene {scene_id}")
+    Returns None if TTS is unavailable/disabled or synthesis fails.
+    """
+    tts = _get_tts_generator()
+    if tts is None:
         return None
-
-    except Exception as e:
-        logger.warning(f"Voiceover generation failed for scene {scene_id}: {e}")
-        return None
+    voiceover_dir = VOICEOVER_DIR / game_id
+    voiceover_dir.mkdir(parents=True, exist_ok=True)
+    path = voiceover_dir / f"recap_scene_{scene_id}.wav"
+    logger.info(f"Generating recap voiceover for scene {scene_id} in game {game_id}")
+    return await asyncio.to_thread(tts.synthesize, recap_text, path)
 
 
 async def generate_characters(
@@ -370,8 +440,7 @@ async def generate_characters(
     # Step 1: Generate character concepts (name, stats)
 
     logger.info(f"Generating {num_characters} characters for scenario: {scenario_name}")
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    model = _get_text_model()
     agent = Agent(model=model, output_type=GeneratedCharacterList)
 
     # Build context-aware prompt
@@ -467,6 +536,253 @@ Skills should match the character's background, stats, and archetype.
     return final_characters
 
 
+async def generate_archetypes(
+    scenario_name: str,
+    scenario_details: Optional[str] = None,
+    num_archetypes: int = 5,
+) -> List[GeneratedArchetype]:
+    """Generate scenario-tailored hero archetypes for players to choose from.
+
+    This is a cheap text-only call. Portraits and full lore are only generated
+    later, after a player commits to one of these archetypes.
+
+    Args:
+        scenario_name: Name of the chosen scenario
+        scenario_details: Markdown DM notes (setting/plot/quest/NPCs) for context
+        num_archetypes: How many distinct archetypes to offer
+
+    Returns:
+        List of GeneratedArchetype options.
+    """
+    logger.info(
+        f"Generating {num_archetypes} archetypes for scenario: {scenario_name}"
+    )
+    model = _get_text_model()
+    agent = Agent(model=model, output_type=GeneratedArchetypeList)
+
+    context_section = ""
+    if scenario_details:
+        context_section = f"""
+SCENARIO CONTEXT:
+{scenario_details}
+
+"""
+
+    prompt = f"""
+You are designing playable hero archetypes for a D&D-style adventure named '{scenario_name}'.
+{context_section}Generate {num_archetypes} DISTINCT hero archetypes that fit THIS specific scenario's
+setting, tone, and quest. Avoid generic filler — each should feel like it belongs in this world and
+covers a different party role (e.g. front-line fighter, stealth/skill specialist, arcane/support,
+face/social, ranged/scout). Make the set complementary so any pick leads to a fun, viable hero.
+
+For each archetype provide:
+- name: An evocative title fitting the scenario (NOT a personal name — a role identity, e.g. 'The Ashen Warden')
+- role: A short party-function label (e.g. 'Front-line bruiser', 'Stealth & sabotage', 'Arcane support')
+- hook: ONE enticing sentence describing the fantasy of playing this archetype in this scenario
+- concept: A vivid VISUAL concept for the portrait — costume, armor/clothing, signature equipment,
+  silhouette and overall vibe (2-3 sentences). Describe gear and style ONLY. Do NOT describe facial
+  features, age, or ethnicity — the player's own face will be used for the portrait.
+
+Make them diverse, scenario-specific, and exciting.
+"""
+    result = await retry_on_overload(agent.run, prompt)
+    archetypes = result.output.archetypes
+    logger.info(f"=== {len(archetypes)} Archetypes Generated ===")
+    logger.info(f"Archetypes: {[a.name for a in archetypes]}")
+    return archetypes
+
+
+def _build_hero_portrait_prompt(
+    hero_name: str, archetype: GeneratedArchetype, has_photo: bool
+) -> str:
+    """Build the portrait prompt for a hero, with or without a player photo."""
+    if has_photo:
+        return (
+            f"Reimagine the person in the reference photograph as {hero_name}, "
+            f"{archetype.concept} "
+            "Keep their facial features, face shape, skin tone and hairstyle clearly "
+            "recognizable so the hero looks like the same person."
+        )
+    return f"{hero_name}. {archetype.concept}"
+
+
+def _generate_hero_portrait_sync(
+    generator: ImageGenerator,
+    hero_name: str,
+    archetype: GeneratedArchetype,
+    art_style: str,
+    photo_path: Optional[pathlib.Path],
+    game_dir: pathlib.Path,
+    idx: int,
+) -> pathlib.Path | None:
+    """Synchronous helper: render one hero portrait (optionally from a photo)."""
+    has_photo = bool(photo_path and pathlib.Path(photo_path).exists())
+    prompt_img = _build_hero_portrait_prompt(hero_name, archetype, has_photo)
+
+    safe_name = (
+        "".join(c for c in hero_name if c.isalnum() or c in " _-")
+        .rstrip()
+        .replace(" ", "_")
+    )
+    filename = f"{idx:02d}_{safe_name or 'hero'}.png"
+    output_path = game_dir / filename
+
+    return generator.generate_character_image(
+        prompt=prompt_img,
+        output_path=output_path,
+        reference_images=[pathlib.Path(photo_path)] if has_photo else None,
+        art_style=art_style,
+    )
+
+
+async def _generate_hero_lore(
+    scenario_name: str,
+    scenario_details: Optional[str],
+    archetype: GeneratedArchetype,
+    has_photo: bool,
+    custom_name: Optional[str] = None,
+) -> GeneratedCharacter:
+    """Generate stats + lore for a single hero fitted to scenario and archetype."""
+    model = _get_text_model()
+    agent = Agent(model=model, output_type=GeneratedCharacter)
+
+    context_section = ""
+    if scenario_details:
+        context_section = f"""
+SCENARIO CONTEXT:
+{scenario_details}
+
+"""
+
+    name_rule = (
+        f"- name: Use EXACTLY this name for the hero: '{custom_name}'"
+        if custom_name
+        else "- name: Invent a fitting full name (with an optional title/nickname)"
+    )
+    appearance_rule = (
+        "- appearance: Describe their COSTUME, equipment, and bearing to match the archetype concept. "
+        + (
+            "Do NOT describe facial features, hair or skin — those come from the player's own photo."
+            if has_photo
+            else "Include distinctive physical and clothing details."
+        )
+    )
+
+    prompt = f"""
+Create ONE fully-realized hero for a D&D-style adventure named '{scenario_name}'.
+{context_section}The hero is built from this archetype (make the character a specific, named embodiment of it):
+- Archetype: {archetype.name} ({archetype.role})
+- Fantasy: {archetype.hook}
+- Visual concept: {archetype.concept}
+
+Provide:
+{name_rule}
+- strength, intelligence, agility: Stats between 1-20 that reflect this archetype's role
+- backstory: 2-3 sentences of history and motivation that tie the hero into THIS scenario
+- personality: 2-3 sentences on their traits, mannerisms, and how they interact with others
+- skills: 3-5 concrete skills matching the archetype and stats
+- inventory: 3-5 items they carry (weapons, tools, magical items, personal effects)
+{appearance_rule}
+
+Make the hero distinctive, memorable, and a natural fit for both the archetype and the scenario.
+"""
+    result = await retry_on_overload(agent.run, prompt)
+    return result.output
+
+
+async def generate_hero(
+    game_id: str,
+    scenario_name: str,
+    scenario_details: Optional[str],
+    archetype: GeneratedArchetype,
+    art_style: str,
+    player_index: int,
+    photo_path: Optional[pathlib.Path] = None,
+    custom_name: Optional[str] = None,
+) -> Character:
+    """Generate a single hero (lore + portrait) from a chosen archetype.
+
+    Lore (text) and the portrait (image) are generated concurrently. When a
+    player photo is provided, the portrait keeps their likeness while restyling
+    them as the archetype hero.
+
+    Args:
+        game_id: Game identifier (for image storage)
+        scenario_name: Name of the scenario
+        scenario_details: Markdown DM notes for context
+        archetype: The archetype the player chose
+        art_style: Art-style key for imagery ("painterly_hero" / "artstation_realism")
+        player_index: 1-based index of the player this hero belongs to
+        photo_path: Optional path to the player's uploaded photo
+        custom_name: Optional player-chosen hero name
+
+    Returns:
+        A fully-populated Character.
+    """
+    has_photo = bool(photo_path and pathlib.Path(photo_path).exists())
+    logger.info(
+        f"Generating hero for player {player_index}: archetype '{archetype.name}', "
+        f"style '{art_style}', photo={'yes' if has_photo else 'no'}"
+    )
+
+    game_dir = IMAGE_DIR / game_id
+    game_dir.mkdir(parents=True, exist_ok=True)
+    generator = _get_image_generator()
+
+    # Kick off lore + portrait concurrently.
+    lore_task = _generate_hero_lore(
+        scenario_name, scenario_details, archetype, has_photo, custom_name
+    )
+    portrait_task = asyncio.to_thread(
+        _generate_hero_portrait_sync,
+        generator,
+        custom_name or archetype.name,
+        archetype,
+        art_style,
+        pathlib.Path(photo_path) if has_photo else None,
+        game_dir,
+        player_index,
+    )
+
+    lore, image_file_path = await asyncio.gather(
+        lore_task, portrait_task, return_exceptions=True
+    )
+
+    if isinstance(lore, Exception):
+        logger.error(f"Hero lore generation failed: {lore}")
+        raise lore
+    if isinstance(image_file_path, Exception):
+        logger.error(f"Hero portrait generation failed: {image_file_path}")
+        image_file_path = None
+
+    hero_name = custom_name or lore.name
+
+    photo_web_path = None
+    if has_photo:
+        photo_web_path = f"/static/photos/{game_id}/{pathlib.Path(photo_path).name}"
+
+    return Character(
+        name=hero_name,
+        strength=lore.strength,
+        intelligence=lore.intelligence,
+        agility=lore.agility,
+        maximum_health=100,
+        current_health=100,
+        backstory=lore.backstory,
+        appearance=lore.appearance,
+        personality=lore.personality,
+        skills=lore.skills,
+        inventory=lore.inventory,
+        image_path=(
+            f"/static/characters/{game_id}/{image_file_path.name}"
+            if image_file_path
+            else None
+        ),
+        archetype=archetype.name,
+        player_photo_path=photo_web_path,
+    )
+
+
 async def generate_scenario_template(
     existing_scenarios: List[ScenarioTemplate],
 ) -> ScenarioTemplate:
@@ -479,8 +795,7 @@ async def generate_scenario_template(
     Returns:
         ScenarioTemplate object with name, one_liner, and full DM notes
     """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    model = _get_text_model()
     agent = Agent(model=model, output_type=GeneratedScenarioTemplate)
 
     logger.info(
@@ -598,8 +913,7 @@ async def generate_initial_locations(
     Returns:
         Dictionary mapping location IDs to Location objects
     """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    model = _get_text_model()
     agent = Agent(model=model, output_type=GeneratedLocationList)
 
     logger.info(f"Generating initial locations for scenario: {scenario_name}")
@@ -900,7 +1214,8 @@ def _process_scene_assets(
     scene_id: int,
     assets_present: list,
     existing_assets: dict[str, Asset],
-    client,
+    generator: ImageGenerator,
+    art_style: Optional[str] = None,
 ) -> tuple[dict[str, Asset], List[str]]:
     """Process assets from generated scene, create new ones, and generate images.
 
@@ -909,7 +1224,8 @@ def _process_scene_assets(
         scene_id: Scene identifier
         assets_present: List of AssetReference objects from the generated scene
         existing_assets: Dictionary of existing assets
-        client: Google GenAI client for image generation
+        generator: Local image backend used to render new asset images
+        art_style: Art-style key for the game
 
     Returns:
         Tuple of (updated assets dictionary, list of visible asset IDs for this scene)
@@ -957,7 +1273,12 @@ def _process_scene_assets(
             # Generate image for the new asset
             try:
                 asset_image_path = _generate_asset_image_sync(
-                    client, game_id, new_asset.id, new_asset.name, new_asset.description
+                    generator,
+                    game_id,
+                    new_asset.id,
+                    new_asset.name,
+                    new_asset.description,
+                    art_style,
                 )
                 if asset_image_path:
                     new_asset.image_path = (
@@ -1013,16 +1334,26 @@ def _process_scene_location(
 
 
 def _generate_asset_image_sync(
-    client, game_id: str, asset_id: str, asset_name: str, asset_description: str
+    generator: ImageGenerator,
+    game_id: str,
+    asset_id: str,
+    asset_name: str,
+    asset_description: str,
+    art_style: Optional[str] = None,
 ) -> pathlib.Path | None:
-    """Generate and save an image for an asset (NPC or object).
+    """Generate and save an image for an asset (NPC or object) via the local backend.
+
+    Uses the same local image generator (FLUX) and per-game art style as character
+    and scene images, so all imagery is produced on-device and Gemini stays
+    text-only. The image is used as a reference for scene consistency.
 
     Args:
-        client: Google GenAI client
+        generator: The configured local image backend
         game_id: Game identifier
         asset_id: Asset identifier
         asset_name: Name of the asset
         asset_description: Physical description
+        art_style: Art-style key for the game
 
     Returns:
         Path to the saved image file, or None if generation failed
@@ -1031,59 +1362,18 @@ def _generate_asset_image_sync(
     asset_dir = pathlib.Path(f"webapp/static/assets/{game_id}")
     asset_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build prompt for asset image
-    prompt = f"""Generate a high-quality fantasy art image of: {asset_name}
-
-Description: {asset_description}
-
-CRITICAL: Generate image in SQUARE orientation (1:1 aspect ratio) - width and height MUST be equal.
-
-Style requirements:
-- Painterly fantasy art style
-- Detailed, cinematic lighting, atmospheric
-- Clear, centered view of the character/object as described
-- Consistent with fantasy adventure game aesthetics
-- DO NOT include text or labels in the image
-- Focus on the subject - minimal background, subject should be prominent
-
-CRITICAL FORMAT REQUIREMENT: Image MUST be in SQUARE orientation (1:1 aspect ratio).
-"""
-
+    prompt = (
+        f"{asset_name}. {asset_description} "
+        "Single clear, centered subject, minimal background, no text or labels."
+    )
     logger.info(f"Generating asset image for: {asset_name}")
 
-    try:
-        from google.genai import types as genai_config  # type: ignore
-
-        # Configure for square aspect ratio
-        config = genai_config.GenerateContentConfig(
-            response_modalities=["image"],
-        )
-
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-image-preview",
-            contents=[prompt],
-            config=config,
-        )
-    except (RuntimeError, ValueError, OSError) as e:
-        logger.warning(f"Asset image generation request failed for {asset_name}: {e}")
-        return None
-
-    if response is not None:
-        try:
-            for part in response.candidates[0].content.parts:  # type: ignore[index]
-                if getattr(part, "inline_data", None) and getattr(
-                    part.inline_data, "data", None
-                ):
-                    img = Image.open(BytesIO(part.inline_data.data))
-                    file_path = asset_dir / f"{asset_id}.png"
-                    img.save(file_path, format="PNG")
-                    logger.info(f"Asset image saved: {file_path}")
-                    return file_path
-        except (OSError, ValueError) as e:
-            logger.warning(f"Failed to decode/save asset image for {asset_name}: {e}")
-            return None
-
-    return None
+    output_path = asset_dir / f"{asset_id}.png"
+    return generator.generate_character_image(
+        prompt=prompt,
+        output_path=output_path,
+        art_style=art_style,
+    )
 
 
 def _build_scene_generation_prompt_rules() -> str:
@@ -1365,6 +1655,13 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
       "is_visible": true | false
     }
   ],
+  "narration_segments": [
+    {
+      "speaker": "Narrator" | "Exact Character/NPC Name",
+      "text": "the words to read aloud (dialogue WITHOUT quotation marks)",
+      "gender": "male" | "female" | "unknown"
+    }
+  ],
   "location_reference": {
     "location_id": "UUID of the location from AVAILABLE LOCATIONS list",
     "time_of_day": "dawn" | "midday" | "afternoon" | "dusk" | "night" | null (optional variation),
@@ -1375,6 +1672,16 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
   } | null,
   "game_status": "ongoing" | "completed" | "failed"
 }
+
+CRITICAL RULES FOR NARRATION SEGMENTS (for the voiced audiobook):
+- Break scene_text into an ordered list of narration_segments covering the ENTIRE scene in reading order.
+- Descriptive prose (anything that is NOT direct speech) -> speaker "Narrator", gender "unknown".
+- Each piece of direct speech -> a separate segment whose speaker is the EXACT name of the
+  character/NPC saying it (match party member and existing asset names when it's one of them; for a
+  minor unnamed speaker use a short label like "Guard" or "Innkeeper"). Put the spoken words in "text"
+  WITHOUT the surrounding quotation marks, and set gender to "male", "female", or "unknown".
+- Preserve the original wording; do NOT invent new lines. This is just scene_text split by speaker.
+- Merge consecutive same-speaker prose into one segment; keep each distinct speech as its own segment.
 
 CRITICAL RULES FOR LOCATIONS:
 - ALWAYS include location_reference for every scene (or null if truly no specific location applies)
@@ -1511,6 +1818,7 @@ async def generate_opening_scene(
     existing_assets: dict[str, Asset],
     existing_locations: dict[str, Location],
     scene_id: int = 1,
+    art_style: Optional[str] = None,
 ) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the opening scene for the chosen scenario.
 
@@ -1526,8 +1834,7 @@ async def generate_opening_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    model = _get_text_model()
     agent = Agent(model=model, output_type=GeneratedScene)
 
     logger.info(f"Generating opening scene for: {scenario_name}")
@@ -1620,8 +1927,8 @@ Make the scene immersive, clear, and exciting!
         existing_locations,
     )
 
-    # Process assets and generate images in background thread
-    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
+    # Process assets and generate images in background thread (local backend)
+    generator = _get_image_generator()
 
     asset_task = asyncio.to_thread(
         _process_scene_assets,
@@ -1629,7 +1936,8 @@ Make the scene immersive, clear, and exciting!
         scene_id,
         generated.assets_present,
         existing_assets,
-        client,
+        generator,
+        art_style,
     )
 
     # Wait for asset processing to complete so we have asset images for scene generation
@@ -1656,14 +1964,16 @@ Make the scene immersive, clear, and exciting!
         generated.game_status,
         updated_assets,
         visible_asset_ids,
+        art_style,
     )
 
-    voiceover_task = asyncio.to_thread(
-        _generate_scene_voiceover_sync,
-        client,
+    voiceover_task = _generate_scene_voiceover(
         game_id,
         scene_id,
         generated.scene_text,
+        updated_characters,
+        updated_assets,
+        generated.narration_segments,
     )
 
     # Wait for both to complete
@@ -1715,6 +2025,7 @@ async def generate_next_scene(
     conversation_history: List[dict],
     existing_assets: dict[str, Asset],
     existing_locations: dict[str, Location],
+    art_style: Optional[str] = None,
 ) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the next scene based on the story so far and player action.
 
@@ -1732,8 +2043,7 @@ async def generate_next_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    model = _get_text_model()
     agent = Agent(model=model, output_type=GeneratedScene)
 
     next_id = last_scene_id + 1
@@ -1862,8 +2172,8 @@ Continue the adventure!
         existing_locations,
     )
 
-    # Process assets and generate images in background thread
-    client = genai_client.Client(api_key=settings.GOOGLE_API_KEY)  # type: ignore[attr-defined]
+    # Process assets and generate images in background thread (local backend)
+    generator = _get_image_generator()
 
     asset_task = asyncio.to_thread(
         _process_scene_assets,
@@ -1871,7 +2181,8 @@ Continue the adventure!
         next_id,
         generated.assets_present,
         existing_assets,
-        client,
+        generator,
+        art_style,
     )
 
     # Wait for asset processing to complete so we have asset images for scene generation
@@ -1898,14 +2209,16 @@ Continue the adventure!
         generated.game_status,
         updated_assets,
         visible_asset_ids,
+        art_style,
     )
 
-    voiceover_task = asyncio.to_thread(
-        _generate_scene_voiceover_sync,
-        client,
+    voiceover_task = _generate_scene_voiceover(
         game_id,
         next_id,
         generated.scene_text,
+        updated_characters,
+        updated_assets,
+        generated.narration_segments,
     )
 
     # Wait for both to complete
@@ -1966,8 +2279,7 @@ async def generate_scene_recap(
     Returns:
         RecapResponse containing overall recap text and individual scene summaries
     """
-    provider = GoogleProvider(api_key=settings.GOOGLE_API_KEY)
-    model = GoogleModel("gemini-2.5-flash", provider=provider)
+    model = _get_text_model()
     agent = Agent(model=model, output_type=RecapResponse)
 
     logger.info(

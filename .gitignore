@@ -215,3 +215,7 @@ __marimo__/
 # Generated Adventures
 webapp/static/
 test_images/
+
+# Local model weights (downloaded on setup, never committed — see README_tts.md)
+models/
+*.onnx
