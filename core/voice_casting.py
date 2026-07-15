@@ -14,29 +14,27 @@ English. `lang_for_voice` maps a voice to the phonemizer language it expects.
 import hashlib
 from typing import Iterable, Optional
 
-# Hand-picked, good-sounding English voices, excluding the default narrator
-# (bm_lewis). US + UK, split by apparent gender. Order is the assignment order
-# after the name-hash rotation.
+# Hand-picked English voices, excluding the default narrator (bm_lewis).
+# Curated to Kokoro's higher-graded voices only (grade in parens) — auditioning
+# showed the low-graded (D) voices sound noticeably flatter, and casting draws
+# uniformly across the pool, so duds would surface on real NPCs. US + UK kept for
+# accent variety; ranked best-grade first.
 MALE_VOICES = [
-    "am_michael",  # US, steady
-    "bm_george",   # UK, warm
-    "am_fenrir",   # US, deep
-    "am_onyx",     # US, resonant
-    "bm_daniel",   # UK, crisp
-    "am_eric",     # US, bright
-    "bm_fable",    # UK, storybook
-    "am_puck",     # US, lively
+    "am_michael",  # US, steady (C+)
+    "am_fenrir",   # US, deep (C+)
+    "am_puck",     # US, lively (C+)
+    "bm_george",   # UK, warm (C)
+    "bm_fable",    # UK, storybook (C)
 ]
 
 FEMALE_VOICES = [
-    "af_heart",     # US, warm (top-rated)
-    "bf_emma",      # UK, measured
-    "af_bella",     # US, rich
-    "bf_isabella",  # UK, elegant
-    "af_nicole",    # US, soft
-    "af_aoede",     # US, clear
-    "bf_alice",     # UK, gentle
-    "af_sarah",     # US, steady
+    "af_heart",     # US, warm (A, top-rated)
+    "af_bella",     # US, rich (A-)
+    "af_nicole",    # US, soft (B-)
+    "bf_emma",      # UK, measured (B-)
+    "af_aoede",     # US, clear (C+)
+    "af_sarah",     # US, steady (C+)
+    "bf_isabella",  # UK, elegant (C)
 ]
 
 

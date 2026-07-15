@@ -8,10 +8,12 @@ these with real model calls (Gemini, OpenAI, etc.) later.
 import asyncio
 import logging
 import pathlib
+import re
+import threading
 from typing import Callable, List, Optional
 
 from google.genai.errors import ClientError, ServerError  # type: ignore
-from pydantic_ai import Agent
+from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
@@ -54,16 +56,41 @@ IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 SCENE_IMAGE_DIR = pathlib.Path("webapp/static/scenes")
 SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Lazy initialization of image generator to avoid loading models at import
+# Lazy initialization of image generator to avoid loading models at import.
+# A lock guards the one-time load so concurrent first-callers don't load twice.
 _image_generator: Optional[ImageGenerator] = None
+_image_generator_lock = threading.Lock()
 
 
 def _get_image_generator() -> ImageGenerator:
-    """Get or initialize the image generator singleton."""
+    """Get or initialize the image generator singleton.
+
+    Thread-safe: the model load is expensive and may be triggered from a worker
+    thread (asyncio.to_thread) so it never blocks the web server's event loop.
+    The lock prevents two concurrent first-callers from loading the model twice
+    (which would OOM the GPU).
+    """
     global _image_generator
     if _image_generator is None:
-        _image_generator = get_image_generator()
+        with _image_generator_lock:
+            if _image_generator is None:
+                _image_generator = get_image_generator()
     return _image_generator
+
+
+def warm_up_models() -> None:
+    """Eagerly load the image + TTS models (blocking). Call from a background
+    thread at startup so the first in-game request doesn't pay the load cost on
+    the event loop. Safe to call more than once; failures are non-fatal.
+    """
+    try:
+        _get_image_generator()
+    except Exception as e:
+        logger.warning(f"Image model warmup failed (will retry on first use): {e}")
+    try:
+        _get_tts_generator()
+    except Exception as e:
+        logger.warning(f"TTS warmup failed (will retry on first use): {e}")
 
 
 def _get_text_model():
@@ -92,6 +119,20 @@ def _get_text_model():
             base_url=settings.LLM_BASE_URL, api_key=settings.LLM_API_KEY
         ),
     )
+
+
+def _text_agent(output_type):
+    """Build a text Agent using the configured model with NATIVE structured output.
+
+    We use NativeOutput (the provider's native JSON-schema response) instead of
+    the default tool-calling output. Gemini 3 requires an encrypted
+    `thought_signature` to be echoed back on any function-call turn; pydantic-ai's
+    validation-retry re-sends the structured-output tool call without it, which
+    Gemini rejects with a 400 ("missing thought_signature in functionCall parts").
+    Native JSON output produces no function-call parts, so it sidesteps the issue
+    entirely — and works the same way for the local OpenAI-compatible backends.
+    """
+    return Agent(model=_get_text_model(), output_type=NativeOutput(output_type))
 
 
 # Lazy TTS generator singleton. `_UNSET` distinguishes "not built yet" from a
@@ -440,8 +481,7 @@ async def generate_characters(
     # Step 1: Generate character concepts (name, stats)
 
     logger.info(f"Generating {num_characters} characters for scenario: {scenario_name}")
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedCharacterList)
+    agent = _text_agent(GeneratedCharacterList)
 
     # Build context-aware prompt
     context_section = ""
@@ -481,7 +521,7 @@ Skills should match the character's background, stats, and archetype.
     game_dir = IMAGE_DIR / game_id
     game_dir.mkdir(parents=True, exist_ok=True)
 
-    generator = _get_image_generator()
+    generator = await asyncio.to_thread(_get_image_generator)
 
     # Step 3: Generate images asynchronously (in thread pool to avoid blocking event loop)
     final_characters: List[Character] = []
@@ -557,8 +597,7 @@ async def generate_archetypes(
     logger.info(
         f"Generating {num_archetypes} archetypes for scenario: {scenario_name}"
     )
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedArchetypeList)
+    agent = _text_agent(GeneratedArchetypeList)
 
     context_section = ""
     if scenario_details:
@@ -643,8 +682,7 @@ async def _generate_hero_lore(
     custom_name: Optional[str] = None,
 ) -> GeneratedCharacter:
     """Generate stats + lore for a single hero fitted to scenario and archetype."""
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedCharacter)
+    agent = _text_agent(GeneratedCharacter)
 
     context_section = ""
     if scenario_details:
@@ -727,7 +765,9 @@ async def generate_hero(
 
     game_dir = IMAGE_DIR / game_id
     game_dir.mkdir(parents=True, exist_ok=True)
-    generator = _get_image_generator()
+    # Acquire (and lazily load) the model off the event loop so the web server
+    # stays responsive during the one-time model load.
+    generator = await asyncio.to_thread(_get_image_generator)
 
     # Kick off lore + portrait concurrently.
     lore_task = _generate_hero_lore(
@@ -795,8 +835,7 @@ async def generate_scenario_template(
     Returns:
         ScenarioTemplate object with name, one_liner, and full DM notes
     """
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedScenarioTemplate)
+    agent = _text_agent(GeneratedScenarioTemplate)
 
     logger.info(
         f"Generating new scenario template (contrasting with {len(existing_scenarios)} existing scenarios)..."
@@ -913,8 +952,7 @@ async def generate_initial_locations(
     Returns:
         Dictionary mapping location IDs to Location objects
     """
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedLocationList)
+    agent = _text_agent(GeneratedLocationList)
 
     logger.info(f"Generating initial locations for scenario: {scenario_name}")
 
@@ -969,6 +1007,49 @@ Ensure locations support different story beats: safe havens, dangerous areas, my
     return locations_dict
 
 
+# --- Name matching --------------------------------------------------------------
+# The scene model refers to party members and NPCs by name, but doesn't always
+# reproduce a long or custom name character-for-character. Exact matching then
+# silently drops health/inventory updates (character sheet doesn't change) and —
+# worse — makes the asset step create a fresh no-photo portrait instead of reusing
+# the player's likeness. These helpers match names tolerantly.
+
+_NAME_STOPWORDS = {"the", "of", "and", "a", "an", "de", "von"}
+
+
+def _norm_name(s: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower()).strip()
+
+
+def _name_tokens(s: str) -> set:
+    return {t for t in _norm_name(s).split() if t and t not in _NAME_STOPWORDS}
+
+
+def _names_match(a: str, b: str) -> bool:
+    """True if two names plausibly refer to the same character."""
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return False
+    if na == nb or na.replace(" ", "") == nb.replace(" ", ""):
+        return True
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return False
+    # One name's significant tokens fully contained in the other's, e.g.
+    # "Kaelia" vs "Kaelia the Spore-Warden".
+    return ta <= tb or tb <= ta
+
+
+def _resolve_char(name: str, char_dict: dict) -> Optional[Character]:
+    """Find the character a change refers to, tolerating name variations."""
+    if name in char_dict:
+        return char_dict[name]
+    for cname, c in char_dict.items():
+        if _names_match(name, cname):
+            return c
+    return None
+
+
 def _apply_character_updates(
     characters: List[Character], generated_scene
 ) -> List[Character]:
@@ -986,13 +1067,13 @@ def _apply_character_updates(
 
     # Apply health changes
     for health_change in generated_scene.health_changes:
-        if health_change.character_name not in char_dict:
+        char = _resolve_char(health_change.character_name, char_dict)
+        if char is None:
             logger.warning(
                 f"Health change for unknown character: {health_change.character_name}. Skipping."
             )
             continue
 
-        char = char_dict[health_change.character_name]
         old_health = char.current_health
         char.current_health = max(
             0,
@@ -1013,13 +1094,13 @@ def _apply_character_updates(
 
     # Apply inventory changes
     for inv_change in generated_scene.inventory_changes:
-        if inv_change.character_name not in char_dict:
+        char = _resolve_char(inv_change.character_name, char_dict)
+        if char is None:
             logger.warning(
                 f"Inventory change for unknown character: {inv_change.character_name}. Skipping."
             )
             continue
 
-        char = char_dict[inv_change.character_name]
         changes = []
 
         # Add new items
@@ -1039,13 +1120,13 @@ def _apply_character_updates(
 
     # Apply skill changes
     for skill_change in generated_scene.skill_changes:
-        if skill_change.character_name not in char_dict:
+        char = _resolve_char(skill_change.character_name, char_dict)
+        if char is None:
             logger.warning(
                 f"Skill change for unknown character: {skill_change.character_name}. Skipping."
             )
             continue
 
-        char = char_dict[skill_change.character_name]
         changes = []
 
         # Learn new skills
@@ -1065,13 +1146,13 @@ def _apply_character_updates(
 
     # Apply stat changes (rare)
     for stat_change in generated_scene.stat_changes:
-        if stat_change.character_name not in char_dict:
+        char = _resolve_char(stat_change.character_name, char_dict)
+        if char is None:
             logger.warning(
                 f"Stat change for unknown character: {stat_change.character_name}. Skipping."
             )
             continue
 
-        char = char_dict[stat_change.character_name]
         changes = []
 
         if stat_change.strength_change != 0:
@@ -1244,6 +1325,22 @@ def _process_scene_assets(
             if asset.name.lower() == asset_ref.name.lower():
                 existing_asset_id = asset_id
                 break
+
+        # If no exact match, try a tolerant match against PARTY members only.
+        # Party portraits carry the player's likeness (photo reference); we must
+        # reuse them even if the scene named the hero slightly differently, rather
+        # than spawning a fresh no-photo asset that looks like someone else. NPC
+        # matching stays exact so distinct NPCs never get merged.
+        if not existing_asset_id:
+            for asset_id, asset in existing_assets.items():
+                if asset_id.startswith("player_") and _names_match(
+                    asset_ref.name, asset.name
+                ):
+                    existing_asset_id = asset_id
+                    logger.info(
+                        f"✓ Matched '{asset_ref.name}' to party member '{asset.name}' (tolerant)"
+                    )
+                    break
 
         if existing_asset_id:
             # Asset exists, use existing one
@@ -1673,6 +1770,15 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
   "game_status": "ongoing" | "completed" | "failed"
 }
 
+NARRATION VOICE & RHYTHM (scene_text is read aloud by a text-to-speech narrator):
+- The narrator's phrasing comes ENTIRELY from your punctuation and sentence shape, so shape it on purpose:
+  * Vary sentence length — mix short, punchy sentences with longer, flowing ones.
+  * Use an em-dash (—) for a dramatic beat or a mid-sentence pause.
+  * Use an ellipsis (…) for suspense or a trailing, ominous thought.
+  * Lean on short sentences and periods at moments of tension; longer clauses read calmer.
+- Avoid run-on sentences strung together with only commas — they read flat and breathless aloud.
+- End every sentence with terminal punctuation (. ! ? or …).
+
 CRITICAL RULES FOR NARRATION SEGMENTS (for the voiced audiobook):
 - Break scene_text into an ordered list of narration_segments covering the ENTIRE scene in reading order.
 - Descriptive prose (anything that is NOT direct speech) -> speaker "Narrator", gender "unknown".
@@ -1834,8 +1940,7 @@ async def generate_opening_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedScene)
+    agent = _text_agent(GeneratedScene)
 
     logger.info(f"Generating opening scene for: {scenario_name}")
 
@@ -1927,8 +2032,10 @@ Make the scene immersive, clear, and exciting!
         existing_locations,
     )
 
-    # Process assets and generate images in background thread (local backend)
-    generator = _get_image_generator()
+    # Process assets and generate images in background thread (local backend).
+    # Acquire (and lazily load) the model off the event loop so the web server
+    # stays responsive during the one-time model load.
+    generator = await asyncio.to_thread(_get_image_generator)
 
     asset_task = asyncio.to_thread(
         _process_scene_assets,
@@ -1947,11 +2054,8 @@ Make the scene immersive, clear, and exciting!
         updated_assets = existing_assets
         visible_asset_ids = []
 
-    # Get image generator backend
-    generator = _get_image_generator()
-
     # Generate scene image and voiceover in background threads (concurrently)
-    # Now we can include asset images in scene generation
+    # Now we can include asset images in scene generation (generator acquired above)
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         generator,
@@ -2043,8 +2147,7 @@ async def generate_next_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=GeneratedScene)
+    agent = _text_agent(GeneratedScene)
 
     next_id = last_scene_id + 1
     logger.info(f"Generating scene {next_id} for: {scenario_name}")
@@ -2172,8 +2275,10 @@ Continue the adventure!
         existing_locations,
     )
 
-    # Process assets and generate images in background thread (local backend)
-    generator = _get_image_generator()
+    # Process assets and generate images in background thread (local backend).
+    # Acquire (and lazily load) the model off the event loop so the web server
+    # stays responsive during the one-time model load.
+    generator = await asyncio.to_thread(_get_image_generator)
 
     asset_task = asyncio.to_thread(
         _process_scene_assets,
@@ -2192,11 +2297,8 @@ Continue the adventure!
         updated_assets = existing_assets
         visible_asset_ids = []
 
-    # Get image generator backend
-    generator = _get_image_generator()
-
     # Generate scene image and voiceover in background threads (concurrently)
-    # Now we can include asset images in scene generation
+    # Now we can include asset images in scene generation (generator acquired above)
     image_task = asyncio.to_thread(
         _generate_scene_image_sync,
         generator,
@@ -2279,8 +2381,7 @@ async def generate_scene_recap(
     Returns:
         RecapResponse containing overall recap text and individual scene summaries
     """
-    model = _get_text_model()
-    agent = Agent(model=model, output_type=RecapResponse)
+    agent = _text_agent(RecapResponse)
 
     logger.info(
         f"Generating recap for game {game_id}, scenes 1-{current_scene_index + 1}"

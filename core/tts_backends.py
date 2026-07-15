@@ -41,10 +41,27 @@ def _clean_for_tts(text: str) -> str:
     text = re.sub(r"^[ \t]*[#>]+[ \t]*", "", text, flags=re.MULTILINE)
     # List bullets at line start.
     text = re.sub(r"^[ \t]*[-•]\s+", "", text, flags=re.MULTILINE)
+
+    # ── Prosody-friendly punctuation ──
+    # Kokoro's phrasing is driven by punctuation, so normalize it so the writer's
+    # intended beats survive as natural pauses. This stays a single synth pass —
+    # it only reshapes the text, it does not split it.
+    # "..." (or more dots) -> a single ellipsis for a trailing, suspenseful pause.
+    text = re.sub(r"\.{3,}", "…", text)
+    # A spaced hyphen used as a dash -> em-dash, a clear mid-sentence beat.
+    text = re.sub(r" +-+ +", " — ", text)
+    # Collapse over-read duplicated end punctuation ("!!!" -> "!", "??" -> "?").
+    text = re.sub(r"([!?])\1+", r"\1", text)
+
     # Collapse excess whitespace.
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    text = text.strip()
+
+    # Ensure the passage ends on terminal punctuation so the read doesn't clip flat.
+    if text and text[-1] not in ".!?…\"'":
+        text += "."
+    return text
 
 
 def _write_wav_int16(path: pathlib.Path, samples, sample_rate: int) -> None:
@@ -123,6 +140,9 @@ class KokoroTTSGenerator(TTSGenerator):
             if not clean:
                 logger.warning("Kokoro TTS: empty text after cleanup, skipping")
                 return None
+            # One pass over the whole passage: Kokoro handles inter-sentence
+            # pauses and flow naturally — splitting into sentences and re-gluing
+            # them sounded choppier and less engaged.
             samples, sample_rate = self.kokoro.create(
                 clean, voice=self.voice, speed=self.speed, lang=self.lang
             )
@@ -136,7 +156,8 @@ class KokoroTTSGenerator(TTSGenerator):
     def synthesize_segments(
         self, segments: list, output_path: pathlib.Path
     ) -> Optional[pathlib.Path]:
-        """Render each (voice_id, text) segment in its own voice and concatenate."""
+        """Render each (voice_id, text) segment in its own voice (single natural
+        pass) and concatenate, with a pause at each speaker change."""
         import numpy as np
 
         from .voice_casting import lang_for_voice
@@ -153,8 +174,8 @@ class KokoroTTSGenerator(TTSGenerator):
                     clean, voice=voice, speed=self.speed, lang=lang_for_voice(voice)
                 )
                 chunks.append(np.asarray(samples, dtype=np.float32))
-                # Short pause between segments so speaker changes read naturally.
-                chunks.append(np.zeros(int(sample_rate * 0.3), dtype=np.float32))
+                # Pause between speaker turns so voice changes read naturally.
+                chunks.append(np.zeros(int(sample_rate * 0.35), dtype=np.float32))
                 spoken += 1
 
             if not chunks:

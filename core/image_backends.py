@@ -3,6 +3,7 @@
 import io
 import logging
 import pathlib
+import threading
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
@@ -11,6 +12,13 @@ from PIL import Image
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+# Serializes GPU inference. Local FLUX pipelines share one CUDA context and use
+# CPU offload hooks, so they are NOT safe to run concurrently — parallel calls
+# (e.g. generating several portraits at once) corrupt CUDA state ("invalid
+# argument"). All FLUX generation acquires this lock so the GPU does one image
+# at a time; concurrent callers simply queue.
+_GPU_LOCK = threading.Lock()
 
 
 # --- Art styles -----------------------------------------------------------------
@@ -73,6 +81,20 @@ def _filter_cloud_references(
         )
         return []
     return refs
+
+
+def _pad_to_square(img: "Image.Image", size: int, bg=(20, 20, 20)) -> "Image.Image":
+    """Resize preserving aspect ratio (longest side = size) and pad to a square.
+
+    Squishing a 3:4 portrait into a square distorts the face and hurts likeness;
+    padding keeps proportions so faces (and details like glasses) survive as a
+    scene reference.
+    """
+    img = img.convert("RGB").copy()
+    img.thumbnail((size, size), Image.LANCZOS)
+    canvas = Image.new("RGB", (size, size), bg)
+    canvas.paste(img, ((size - img.width) // 2, (size - img.height) // 2))
+    return canvas
 
 
 def _load_portrait_reference(path: pathlib.Path, max_side: int = 1024) -> "Image.Image":
@@ -602,7 +624,8 @@ class FluxKontextImageGenerator(ImageGenerator):
             )
             if ref is not None:
                 kwargs["image"] = ref
-            image = self.pipe(**kwargs).images[0]
+            with _GPU_LOCK:
+                image = self.pipe(**kwargs).images[0]
 
             image.save(output_path)
             logger.info(f"✓ FLUX Kontext: Saved character image to {output_path}")
@@ -660,31 +683,33 @@ class FluxKontextImageGenerator(ImageGenerator):
                     f"FLUX Kontext: Generating scene with {n} reference image(s) "
                     f"(stitched to {reference.width}×{reference.height})"
                 )
-                result = self.pipe(
-                    image=reference,
-                    prompt=enhanced_prompt,
-                    guidance_scale=settings.FLUX_KONTEXT_GUIDANCE_SCALE,
-                    num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
-                    height=768,
-                    width=1024,
-                    max_sequence_length=256,
-                    generator=self._make_generator(),
-                ).images[0]
+                with _GPU_LOCK:
+                    result = self.pipe(
+                        image=reference,
+                        prompt=enhanced_prompt,
+                        guidance_scale=settings.FLUX_KONTEXT_GUIDANCE_SCALE,
+                        num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
+                        height=768,
+                        width=1024,
+                        max_sequence_length=256,
+                        generator=self._make_generator(),
+                    ).images[0]
             else:
                 enhanced_prompt = (
                     f"{self._shorten_prompt(prompt)}. "
                     f"Wide cinematic composition, landscape orientation. {suffix}"
                 )
                 logger.info("FLUX Kontext: Generating scene (no references)...")
-                result = self.pipe(
-                    prompt=enhanced_prompt,
-                    guidance_scale=settings.FLUX_KONTEXT_GUIDANCE_SCALE,
-                    num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
-                    height=768,
-                    width=1024,
-                    max_sequence_length=256,
-                    generator=self._make_generator(),
-                ).images[0]
+                with _GPU_LOCK:
+                    result = self.pipe(
+                        prompt=enhanced_prompt,
+                        guidance_scale=settings.FLUX_KONTEXT_GUIDANCE_SCALE,
+                        num_inference_steps=settings.IMAGE_NUM_INFERENCE_STEPS,
+                        height=768,
+                        width=1024,
+                        max_sequence_length=256,
+                        generator=self._make_generator(),
+                    ).images[0]
 
             result.save(output_path)
             logger.info(f"✓ FLUX Kontext: Saved scene image to {output_path}")
@@ -960,7 +985,8 @@ class FluxKleinImageGenerator(ImageGenerator):
             )
             if ref is not None:
                 kwargs["image"] = [ref]
-            image = self.pipe(**kwargs).images[0]
+            with _GPU_LOCK:
+                image = self.pipe(**kwargs).images[0]
             image.save(output_path)
             logger.info(f"✓ FLUX.2 Klein: Saved character image to {output_path}")
             return output_path
@@ -983,23 +1009,31 @@ class FluxKleinImageGenerator(ImageGenerator):
                 # references OOM the GPU — use a smaller reference size there.
                 # CUDA stays at full size. Attention cost scales ~quadratically
                 # with this, so a smaller size cuts peak memory sharply.
-                ref_size = (
-                    settings.FLUX_KLEIN_MPS_REFERENCE_SIZE
-                    if self.device == "mps"
-                    else settings.FLUX_KLEIN_REFERENCE_SIZE
-                )
-                refs = []
+                existing = []
                 for p in reference_images:
                     p = pathlib.Path(p)
                     if p.exists():
-                        # Klein expects square-ish reference images.
-                        refs.append(
-                            Image.open(p)
-                            .convert("RGB")
-                            .resize((ref_size, ref_size), Image.LANCZOS)
-                        )
+                        existing.append(p)
                     else:
                         logger.warning(f"Reference image not found: {p}")
+
+                # Reference resolution drives how much facial detail (e.g. glasses)
+                # survives into the scene. A single reference (typical solo hero)
+                # can afford a higher, proven-safe size on a 10GB card; multiple
+                # references scale down to stay within VRAM (attention cost grows
+                # ~quadratically and multi-ref @768 triggers driver paging).
+                if self.device == "mps":
+                    ref_size = settings.FLUX_KLEIN_MPS_REFERENCE_SIZE
+                elif len(existing) <= 1:
+                    ref_size = max(settings.FLUX_KLEIN_REFERENCE_SIZE, 768)
+                elif len(existing) == 2:
+                    ref_size = max(settings.FLUX_KLEIN_REFERENCE_SIZE, 640)
+                else:
+                    ref_size = settings.FLUX_KLEIN_REFERENCE_SIZE
+
+                # Pad (don't squish) so the portrait's proportions — and the face —
+                # are preserved rather than distorted into a square.
+                refs = [_pad_to_square(Image.open(p), ref_size) for p in existing]
 
                 n = len(refs)
                 enhanced_prompt = (
@@ -1010,29 +1044,31 @@ class FluxKleinImageGenerator(ImageGenerator):
                 logger.info(
                     f"FLUX.2 Klein: Generating scene with {n} native reference image(s)..."
                 )
-                result = self.pipe(
-                    prompt=enhanced_prompt,
-                    image=refs,
-                    guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
-                    num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
-                    height=768,
-                    width=1024,
-                    generator=self._make_generator(),
-                ).images[0]
+                with _GPU_LOCK:
+                    result = self.pipe(
+                        prompt=enhanced_prompt,
+                        image=refs,
+                        guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                        num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                        height=768,
+                        width=1024,
+                        generator=self._make_generator(),
+                    ).images[0]
             else:
                 enhanced_prompt = (
                     f"{prompt}. Wide cinematic composition, landscape orientation. "
                     f"{suffix}"
                 )
                 logger.info("FLUX.2 Klein: Generating scene (no references)...")
-                result = self.pipe(
-                    prompt=enhanced_prompt,
-                    guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
-                    num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
-                    height=768,
-                    width=1024,
-                    generator=self._make_generator(),
-                ).images[0]
+                with _GPU_LOCK:
+                    result = self.pipe(
+                        prompt=enhanced_prompt,
+                        guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                        num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                        height=768,
+                        width=1024,
+                        generator=self._make_generator(),
+                    ).images[0]
 
             result.save(output_path)
             logger.info(f"✓ FLUX.2 Klein: Saved scene to {output_path}")

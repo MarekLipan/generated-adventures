@@ -291,17 +291,23 @@ async def _do_generate_hero(
         )
         return
 
-    _show_hero_preview(
-        main_container,
-        game_id,
-        scenario_name,
-        archetypes,
-        player_index,
-        chosen_archetypes,
-        archetype,
-        photo_holder,
-        hero,
-    )
+    try:
+        _show_hero_preview(
+            main_container,
+            game_id,
+            scenario_name,
+            archetypes,
+            player_index,
+            chosen_archetypes,
+            archetype,
+            photo_holder,
+            hero,
+        )
+    except RuntimeError as e:
+        # The browser client can disappear during a long generation (e.g. a
+        # dropped/reloaded connection). Nothing to render onto then — log and
+        # exit quietly instead of surfacing an unhandled task exception.
+        logger.warning(f"Hero preview skipped — UI client no longer connected: {e}")
 
 
 def _show_hero_preview(
@@ -328,6 +334,14 @@ def _show_hero_preview(
             ui.label(
                 f"Archetype: {archetype.name}"
             ).classes("text-sm fantasy-text-muted mb-4")
+
+            # Large portrait preview — the party-card thumbnail alone is too small
+            # to appreciate the full-resolution render.
+            if hero.image_path:
+                with ui.row().classes("w-full justify-center mb-4"):
+                    ui.image(hero.image_path).classes(
+                        "w-72 max-w-full rounded-lg shadow-lg"
+                    )
 
             render_character_cards([hero], game_id)
 

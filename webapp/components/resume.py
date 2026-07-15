@@ -5,7 +5,7 @@ from nicegui import ui
 from webapp.services import game_flow  # type: ignore
 
 from .adventure import start_adventure  # type: ignore
-from .characters import show_characters  # type: ignore
+from .hero_creation import start_hero_creation  # type: ignore
 from .party import show_character_overview  # type: ignore
 from .scenarios import show_scenarios  # type: ignore
 
@@ -52,5 +52,5 @@ async def resume_game(main_container, game_id: str):
         show_character_overview(main_container, game_id)
         return
 
-    # If we have scenario but no characters, show character selection
-    await show_characters(main_container, game_id, scenario.name)
+    # If we have scenario but no characters, start hero creation
+    await start_hero_creation(main_container, game_id, scenario.name)

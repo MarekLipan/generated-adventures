@@ -153,8 +153,9 @@ class Settings(BaseSettings):
     # Language code passed to the phonemizer; match the voice's region
     # (en-gb for British voices, en-us for American).
     KOKORO_LANG: str = "en-gb"
-    # Playback speed multiplier (1.0 = natural). Slightly <1 reads more deliberately.
-    KOKORO_SPEED: float = 1.0
+    # Playback speed multiplier (1.0 = natural). Slightly <1 reads more
+    # deliberately — 0.92 gives a measured, engaged storyteller pace for the DM.
+    KOKORO_SPEED: float = 0.92
 
     # Gemini TTS voice name (used only when TTS_PROVIDER="gemini").
     GEMINI_TTS_VOICE: str = "Algieba"
