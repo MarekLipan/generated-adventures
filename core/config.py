@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # any reference photos, so player photos never leave the machine by accident.
     ALLOW_CLOUD_IMAGE_UPLOAD: bool = False
 
+    # Load local image models from the on-disk HuggingFace cache only, without
+    # contacting the Hub. True (default) once the models are downloaded: startup
+    # is fully offline (no network waits), and — importantly — a transient Hub
+    # outage (e.g. a 504 on the model metadata check) can no longer throw during
+    # the quantized load and silently drop the fast NF4 pipeline down to the slow
+    # bfloat16 + sequential-CPU-offload fallback. Set False only when downloading
+    # a model for the very first time.
+    IMAGE_HF_OFFLINE: bool = True
+
     # FLUX Kontext settings (for flux-kontext backend)
     # Open-weights image model with native character/object consistency.
     FLUX_KONTEXT_MODEL: str = "black-forest-labs/FLUX.1-Kontext-dev"
@@ -98,12 +107,20 @@ class Settings(BaseSettings):
     # slower or crash on the current torch/CUDA build; bitsandbytes has fast kernels.
     FLUX_KLEIN_QUANTIZATION: Literal["none", "nf4", "int8"] = "nf4"
 
-    # Edge length each reference image is resized to before being fed to Klein.
-    # Attention cost grows ~quadratically with this, and multiple references add
-    # up fast. On a 10 GB card, references >~640 px push peak VRAM over the limit
-    # and trigger driver memory paging (3 refs @768 px = ~90 s vs @512 px = ~15 s),
-    # so 512 keeps multi-character scenes fast. Raise on cards with more VRAM.
-    FLUX_KLEIN_REFERENCE_SIZE: int = 512
+    # Edge length each reference image is resized to before being fed to Klein
+    # for MULTI-reference scenes (the floor used at the 3-reference tier; 1–2
+    # references render larger — see generate_scene_image). Attention cost grows
+    # ~quadratically with this. 640 favors character coherence over speed: a
+    # crowded scene renders more slowly (driver paging on a 10 GB card) but each
+    # face/outfit survives far better than at 512. Lower this to 512 if renders
+    # are too slow or you hit out-of-memory; raise it on cards with more VRAM.
+    FLUX_KLEIN_REFERENCE_SIZE: int = 640
+    # Maximum reference portraits fed into a single scene render. Klein scales ALL
+    # references down together to fit VRAM, so fewer, higher-priority references =
+    # higher resolution each = sharper characters. References are chosen best-first
+    # (party heroes, then NPCs, then objects), so objects and bit-part extras are
+    # dropped past this cap rather than dragging every character down to a thumbnail.
+    IMAGE_MAX_SCENE_REFERENCES: int = 3
     # MPS has no flash-attention kernel, so the full attention matrix is
     # materialized in one allocation. With a multi-character party, 1024px
     # references OOM a 32 GB Mac (a single ~30 GB MTLBuffer); 512px fits with

@@ -73,7 +73,11 @@ def main_page():
     # Add custom CSS
     ui.add_head_html('<link rel="stylesheet" href="/static/css/fantasy-theme.css">')
     ui.add_head_html(
-        '<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">'
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        '<link href="https://fonts.googleapis.com/css2?'
+        "family=Cinzel:wght@400;600;700&"
+        "family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap\" rel=\"stylesheet\">"
     )
 
     # Set dark mode

@@ -1,5 +1,6 @@
 """PDF generation for character sheets."""
 
+import html
 import io
 from pathlib import Path
 
@@ -168,7 +169,17 @@ def generate_character_sheet_pdf(character: Character, game_id: str = None) -> b
     inventory_content = []
     inventory_content.append(Paragraph("Inventory", heading_style))
     if character.inventory:
-        inventory_text = "<br/>".join([f"• {item}" for item in character.inventory])
+        inventory_text = "<br/>".join(
+            [
+                f"• <b>{html.escape(getattr(item, 'name', str(item)))}</b>"
+                + (
+                    f" — {html.escape(getattr(item, 'purpose', '') or '')}"
+                    if getattr(item, "purpose", "")
+                    else ""
+                )
+                for item in character.inventory
+            ]
+        )
         inventory_content.append(Paragraph(inventory_text, body_style))
     else:
         inventory_content.append(Paragraph("No items", body_style))
@@ -324,7 +335,17 @@ def _build_character_content(character: Character, game_id: str = None) -> list:
     # Inventory
     story.append(Paragraph("Inventory", heading_style))
     if character.inventory:
-        inventory_text = "<br/>".join([f"• {item}" for item in character.inventory])
+        inventory_text = "<br/>".join(
+            [
+                f"• <b>{html.escape(getattr(item, 'name', str(item)))}</b>"
+                + (
+                    f" — {html.escape(getattr(item, 'purpose', '') or '')}"
+                    if getattr(item, "purpose", "")
+                    else ""
+                )
+                for item in character.inventory
+            ]
+        )
         story.append(Paragraph(inventory_text, body_style))
     else:
         story.append(Paragraph("No items", body_style))

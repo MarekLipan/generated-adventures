@@ -127,6 +127,8 @@ async def create_hero_for_player(
     total_players = game_state.players
     # Photo bytes uploaded for this player (mutable holder shared with the handler).
     photo_holder = {"bytes": None, "suffix": ".jpg", "name": None}
+    # Player-chosen gender for this hero (drives pronouns in the narration).
+    gender_holder = {"value": "male"}
 
     available = [a for a in archetypes if a.name not in chosen_archetypes]
 
@@ -185,6 +187,23 @@ async def create_hero_for_player(
                     max_files=1,
                 ).props('accept="image/*" flat').classes("w-full")
 
+            # --- Gender (drives the narrator's pronouns for this hero) ---
+            with ui.card().classes("w-full mb-6 p-4"):
+                ui.label("⚧ Character Gender").classes(
+                    "text-h6 fantasy-text-gold mb-2"
+                )
+                ui.label(
+                    "The Dungeon Master uses this so the story refers to your hero "
+                    "with the right pronouns."
+                ).classes("text-xs fantasy-text-muted mb-3")
+                # A radio group (not ui.toggle) so the selected option is always
+                # clearly indicated — the app's global button theme overrides the
+                # segmented toggle's active-state highlight, hiding the selection.
+                ui.radio(
+                    {"male": "Male", "female": "Female", "nonbinary": "Non-binary"},
+                    value="male",
+                ).props("inline color=amber").bind_value(gender_holder, "value")
+
             # --- Archetype cards ---
             ui.label("🛡️ Choose an Archetype").classes(
                 "text-h5 fantasy-text-gold mb-3"
@@ -215,6 +234,7 @@ async def create_hero_for_player(
                                     chosen_archetypes,
                                     a,
                                     photo_holder,
+                                    gender_holder,
                                 )
                             ),
                         ).classes("w-full mt-2")
@@ -229,6 +249,7 @@ async def _do_generate_hero(
     chosen_archetypes: set,
     archetype,
     photo_holder: dict,
+    gender_holder: dict,
     custom_name: str | None = None,
 ):
     """Generate one hero from a chosen archetype and show a confirmation preview."""
@@ -267,6 +288,7 @@ async def _do_generate_hero(
             scenario_details=scenario_details,
             photo_path=photo_path,
             custom_name=custom_name,
+            gender=gender_holder.get("value", "unspecified"),
         )
     except Exception as e:
         logger.error(f"Error generating hero: {e}", exc_info=True)
@@ -285,6 +307,7 @@ async def _do_generate_hero(
                     chosen_archetypes,
                     archetype,
                     photo_holder,
+                    gender_holder,
                     custom_name,
                 )
             ),
@@ -301,6 +324,7 @@ async def _do_generate_hero(
             chosen_archetypes,
             archetype,
             photo_holder,
+            gender_holder,
             hero,
         )
     except RuntimeError as e:
@@ -319,6 +343,7 @@ def _show_hero_preview(
     chosen_archetypes: set,
     archetype,
     photo_holder: dict,
+    gender_holder: dict,
     hero,
 ):
     """Preview a generated hero with rename / regenerate / confirm controls."""
@@ -379,6 +404,7 @@ def _show_hero_preview(
                             chosen_archetypes,
                             archetype,
                             photo_holder,
+                            gender_holder,
                             name_input.value or None,
                         )
                     ),

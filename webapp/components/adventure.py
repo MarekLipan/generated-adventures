@@ -246,6 +246,11 @@ async def start_adventure(main_container, game_id: str):
 
         # Continue with normal scene rendering for ongoing games
         with main_container:
+            # Cinematic establishing shot above the narrative
+            if scene.image_path:
+                with ui.element("div").classes("scene-banner w-full max-w-4xl mb-4"):
+                    ui.image(scene.image_path).classes("w-full rounded-lg")
+
             with ui.card().classes("fantasy-panel w-full max-w-4xl"):
                 # Scenario title at the top
                 scenario = game_flow.get_scenario_for_game(game_id)
@@ -274,12 +279,6 @@ async def start_adventure(main_container, game_id: str):
                         )
                         ui.audio(scene.voiceover_path).classes("flex-grow")
                     ui.html('<div class="ornate-divider"></div>')
-
-            # Display scene image if available
-            if scene.image_path:
-                ui.image(scene.image_path).classes(
-                    "w-full max-w-3xl rounded-lg shadow-lg mb-6"
-                )
 
             # Display character changes from this scene
             render_character_changes(scene)

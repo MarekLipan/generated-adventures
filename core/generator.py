@@ -274,6 +274,54 @@ def _generate_character_image_sync(
     return concept.name, image_file_path
 
 
+def _prioritize_scene_references(
+    assets: dict[str, Asset],
+    visible_asset_ids: List[str],
+    max_refs: int,
+) -> tuple[List[pathlib.Path], list, list]:
+    """Choose which visible assets become scene image references, best-first, capped.
+
+    Klein downsizes ALL references together to fit VRAM, so a crowded reference
+    list makes every face a low-res thumbnail. We keep identity-bearing references
+    first — party heroes, then NPCs, then objects — and cap the count, so the
+    characters that must stay recognizable each get a higher resolution and
+    objects/extras are dropped rather than dragging everyone down.
+
+    Returns (reference_files, kept_assets, dropped_assets).
+    """
+
+    def priority(aid: str) -> int:
+        asset = assets.get(aid)
+        if asset is None:
+            return 3
+        if str(aid).startswith("player_"):  # party hero — most important
+            return 0
+        if getattr(asset, "type", None) == "npc":
+            return 1
+        return 2  # object
+
+    candidates = []
+    for aid in visible_asset_ids or []:
+        asset = assets.get(aid)
+        if not asset or not asset.image_path:
+            continue
+        ref_file = pathlib.Path("webapp") / asset.image_path.lstrip("/")
+        if not ref_file.exists():
+            logger.warning(f"Reference image not found, skipping: {ref_file}")
+            continue
+        candidates.append((priority(aid), asset, ref_file))
+
+    # Stable sort keeps the scene's original ordering within each priority band.
+    candidates.sort(key=lambda t: t[0])
+    kept = candidates[: max(0, max_refs)]
+    dropped = candidates[max(0, max_refs) :]
+    return (
+        [ref_file for _, _, ref_file in kept],
+        [asset for _, asset, _ in kept],
+        [asset for _, asset, _ in dropped],
+    )
+
+
 def _generate_scene_image_sync(
     generator: ImageGenerator,
     game_id: str,
@@ -321,19 +369,21 @@ def _generate_scene_image_sync(
 
     prompt_text = f"{visual_description} {scenario_name} fantasy setting.{mood}"
 
-    # Collect reference images for character/asset consistency
+    # Collect reference images for character/asset consistency — prioritized and
+    # capped so each surviving reference renders at a higher resolution (Klein
+    # scales all references down together to fit VRAM).
     reference_images: List[pathlib.Path] = []
     if assets and visible_asset_ids:
-        for asset_id in visible_asset_ids:
-            asset = assets.get(asset_id)
-            if asset and asset.image_path:
-                # Convert web path to file path
-                asset_image_file = pathlib.Path("webapp") / asset.image_path.lstrip("/")
-                if asset_image_file.exists():
-                    reference_images.append(asset_image_file)
-                    logger.info(
-                        f"✓ Added reference image for asset: {asset.name} ({asset.type})"
-                    )
+        reference_images, kept, dropped = _prioritize_scene_references(
+            assets, visible_asset_ids, settings.IMAGE_MAX_SCENE_REFERENCES
+        )
+        for a in kept:
+            logger.info(f"✓ Reference [{a.type}]: {a.name}")
+        if dropped:
+            logger.info(
+                f"↓ Dropped {len(dropped)} lower-priority reference(s) to keep "
+                f"resolution high: {', '.join(a.name for a in dropped)}"
+            )
 
     logger.info(
         f"Generating scene image for scene {scene_id} with {len(reference_images)} reference images"
@@ -359,30 +409,27 @@ def _resolve_segment_voices(
     characters: List[Character],
     assets: dict[str, Asset],
 ) -> list:
-    """Map narration segments to (voice_id, text), casting/persisting speaker voices.
+    """Map narration segments to (voice_id, text), casting/persisting NPC voices.
 
-    Narrator uses the configured default voice. Party members and NPCs get a stable
-    voice stored on their object (persisted across scenes). Minor unnamed speakers
-    get a deterministic voice by name (no persistence needed).
+    Narrator uses the configured default voice. NPCs get a stable voice stored on
+    their asset (persisted across scenes); minor unnamed speakers get a deterministic
+    voice by name. PLAYER (party) characters are never given a distinct voice — their
+    words belong to the players, so any line the model wrongly attributed to a party
+    member is read plainly in the narrator's voice.
     """
     narrator = settings.KOKORO_VOICE
-    taken = set(
-        filter(
-            None,
-            [c.assigned_voice for c in characters]
-            + [a.assigned_voice for a in assets.values()],
-        )
-    )
+    # Only NPC/asset voices are reserved; party members are intentionally unvoiced.
+    taken = set(filter(None, [a.assigned_voice for a in assets.values()]))
 
-    def match(name: str):
-        key = name.strip().lower()
-        for c in characters:
-            cn = c.name.lower()
-            if key == cn or key in cn.split():
-                return c
-        for a in assets.values():
-            an = a.name.lower()
-            if key == an or key in an.split():
+    def is_party(name: str) -> bool:
+        return any(_names_match(name, c.name) for c in characters)
+
+    def match_npc(name: str):
+        # NPC assets only — skip the player_-prefixed party image-assets.
+        for aid, a in assets.items():
+            if aid.startswith("player_"):
+                continue
+            if _npc_names_match(name, a.name):
                 return a
         return None
 
@@ -393,14 +440,19 @@ def _resolve_segment_voices(
             segments.append((narrator, seg.text))
             continue
 
-        obj = match(seg.speaker)
-        if obj is not None:
-            if not obj.assigned_voice:
-                obj.assigned_voice = voice_casting.cast_voice(
-                    obj.name, seg.gender, taken=taken, exclude=narrator
+        # Player characters are never voiced — read their (mis-attributed) line as narration.
+        if is_party(seg.speaker):
+            segments.append((narrator, seg.text))
+            continue
+
+        npc = match_npc(seg.speaker)
+        if npc is not None:
+            if not npc.assigned_voice:
+                npc.assigned_voice = voice_casting.cast_voice(
+                    npc.name, seg.gender, taken=taken, exclude=narrator
                 )
-                taken.add(obj.assigned_voice)
-            segments.append((obj.assigned_voice, seg.text))
+                taken.add(npc.assigned_voice)
+            segments.append((npc.assigned_voice, seg.text))
         else:
             # Minor / unknown speaker: deterministic by name, not persisted.
             voice = voice_casting.cast_voice(
@@ -680,6 +732,7 @@ async def _generate_hero_lore(
     archetype: GeneratedArchetype,
     has_photo: bool,
     custom_name: Optional[str] = None,
+    gender: str = "unspecified",
 ) -> GeneratedCharacter:
     """Generate stats + lore for a single hero fitted to scenario and archetype."""
     agent = _text_agent(GeneratedCharacter)
@@ -705,6 +758,12 @@ SCENARIO CONTEXT:
             else "Include distinctive physical and clothing details."
         )
     )
+    gender_line = (
+        f"- The hero is {gender}. Use {gender} pronouns and gendered language "
+        "throughout the backstory, personality, and appearance.\n"
+        if gender and gender != "unspecified"
+        else ""
+    )
 
     prompt = f"""
 Create ONE fully-realized hero for a D&D-style adventure named '{scenario_name}'.
@@ -712,14 +771,17 @@ Create ONE fully-realized hero for a D&D-style adventure named '{scenario_name}'
 - Archetype: {archetype.name} ({archetype.role})
 - Fantasy: {archetype.hook}
 - Visual concept: {archetype.concept}
-
+{gender_line}
 Provide:
 {name_rule}
 - strength, intelligence, agility: Stats between 1-20 that reflect this archetype's role
 - backstory: 2-3 sentences of history and motivation that tie the hero into THIS scenario
 - personality: 2-3 sentences on their traits, mannerisms, and how they interact with others
 - skills: 3-5 concrete skills matching the archetype and stats
-- inventory: 3-5 items they carry (weapons, tools, magical items, personal effects)
+- inventory: 3-4 starting items. Each item needs a PLAIN, non-cryptic name AND a one-sentence
+  purpose (what it does and when the player would use it). Favor a few clearly-useful items
+  (a signature weapon, a tool tied to one of their skills, one situational item) over opaque
+  flavor trinkets, so the player always knows what each item is for.
 {appearance_rule}
 
 Make the hero distinctive, memorable, and a natural fit for both the archetype and the scenario.
@@ -737,6 +799,7 @@ async def generate_hero(
     player_index: int,
     photo_path: Optional[pathlib.Path] = None,
     custom_name: Optional[str] = None,
+    gender: str = "unspecified",
 ) -> Character:
     """Generate a single hero (lore + portrait) from a chosen archetype.
 
@@ -771,7 +834,7 @@ async def generate_hero(
 
     # Kick off lore + portrait concurrently.
     lore_task = _generate_hero_lore(
-        scenario_name, scenario_details, archetype, has_photo, custom_name
+        scenario_name, scenario_details, archetype, has_photo, custom_name, gender
     )
     portrait_task = asyncio.to_thread(
         _generate_hero_portrait_sync,
@@ -803,6 +866,7 @@ async def generate_hero(
 
     return Character(
         name=hero_name,
+        gender=gender if gender in ("male", "female", "nonbinary") else "unspecified",
         strength=lore.strength,
         intelligence=lore.intelligence,
         agility=lore.agility,
@@ -1040,6 +1104,24 @@ def _names_match(a: str, b: str) -> bool:
     return ta <= tb or tb <= ta
 
 
+def _npc_names_match(a: str, b: str) -> bool:
+    """Tolerant match for NPCs/objects: normalized token-set EQUALITY.
+
+    Reunites naming drift that differs only by articles, case, spacing or
+    punctuation ("The Echo Child" / "Echo-Child" / "echo child") so a recurring
+    NPC keeps ONE asset and one portrait. Unlike `_names_match` (used for party
+    members) it does NOT match on token subset, so genuinely different NPCs like
+    "Guard" vs "Guard Captain" are kept apart rather than merged.
+    """
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return False
+    if na == nb or na.replace(" ", "") == nb.replace(" ", ""):
+        return True
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    return bool(ta) and ta == tb
+
+
 def _resolve_char(name: str, char_dict: dict) -> Optional[Character]:
     """Find the character a change refers to, tolerating name variations."""
     if name in char_dict:
@@ -1048,6 +1130,22 @@ def _resolve_char(name: str, char_dict: dict) -> Optional[Character]:
         if _names_match(name, cname):
             return c
     return None
+
+
+def _item_name(item) -> str:
+    """Item display name, tolerant of legacy bare-string items."""
+    return getattr(item, "name", str(item))
+
+
+def _format_inventory(items) -> str:
+    """Render inventory as 'Name (purpose); ...' for prompts ('None' if empty)."""
+    if not items:
+        return "None"
+    parts = []
+    for it in items:
+        purpose = getattr(it, "purpose", "") or ""
+        parts.append(f"{_item_name(it)} ({purpose})" if purpose else _item_name(it))
+    return "; ".join(parts)
 
 
 def _apply_character_updates(
@@ -1102,18 +1200,35 @@ def _apply_character_updates(
             continue
 
         changes = []
+        have = {_item_name(it).strip().lower() for it in char.inventory}
 
-        # Add new items
+        # Add new items (structured), skipping ones already carried (by name).
         for item in inv_change.items_added:
-            if item not in char.inventory:
+            key = _item_name(item).strip().lower()
+            if key and key not in have:
                 char.inventory.append(item)
-                changes.append(f"+{item}")
+                have.add(key)
+                changes.append(f"+{_item_name(item)}")
 
-        # Remove items
-        for item in inv_change.items_removed:
-            if item in char.inventory:
-                char.inventory.remove(item)
-                changes.append(f"-{item}")
+        # Remove items by name, tolerating minor naming variation
+        # ("lockpicks" vs "Clockwork Lockpicks").
+        for name in inv_change.items_removed:
+            key = str(name).strip().lower()
+            if not key:
+                continue
+            match = next(
+                (
+                    it
+                    for it in char.inventory
+                    if (n := _item_name(it).strip().lower()) == key
+                    or key in n
+                    or n in key
+                ),
+                None,
+            )
+            if match is not None:
+                char.inventory.remove(match)
+                changes.append(f"-{_item_name(match)}")
 
         if changes:
             logger.info(f"Updated {char.name} inventory: {', '.join(changes)}")
@@ -1326,19 +1441,25 @@ def _process_scene_assets(
                 existing_asset_id = asset_id
                 break
 
-        # If no exact match, try a tolerant match against PARTY members only.
-        # Party portraits carry the player's likeness (photo reference); we must
-        # reuse them even if the scene named the hero slightly differently, rather
-        # than spawning a fresh no-photo asset that looks like someone else. NPC
-        # matching stays exact so distinct NPCs never get merged.
+        # If no exact match, try a tolerant match. Party portraits carry the
+        # player's likeness (photo reference), so match them loosely (subset) to
+        # always reuse them even if the hero was named slightly differently. NPCs
+        # and objects match on normalized token-set EQUALITY, which reunites
+        # naming drift ("The Echo Child" vs "Echo-Child") into ONE asset/portrait
+        # while keeping distinct NPCs ("Guard" vs "Guard Captain") apart.
         if not existing_asset_id:
             for asset_id, asset in existing_assets.items():
-                if asset_id.startswith("player_") and _names_match(
-                    asset_ref.name, asset.name
-                ):
+                is_party = asset_id.startswith("player_")
+                matched = (
+                    _names_match(asset_ref.name, asset.name)
+                    if is_party
+                    else _npc_names_match(asset_ref.name, asset.name)
+                )
+                if matched:
                     existing_asset_id = asset_id
                     logger.info(
-                        f"✓ Matched '{asset_ref.name}' to party member '{asset.name}' (tolerant)"
+                        f"✓ Matched '{asset_ref.name}' to existing "
+                        f"'{asset.name}' (tolerant, {'party' if is_party else 'npc'})"
                     )
                     break
 
@@ -1489,6 +1610,18 @@ CRITICAL RULES FOR PROMPT TYPES - VARY THE PROMPTS:
 - Use action for: simple tasks, exploration without immediate danger, planning, easy skill checks, or coordinated team efforts
 - Use dice_check for: combat, risky actions, difficult skill checks, life-or-death situations
 
+CHOICE vs. ROLL — NEVER MIX THEM (this is critical for a coherent UI):
+- If you are offering the player a CHOICE between courses of action ("do you descend OR hesitate?",
+  "approach the guard OR sneak past?"), the type MUST be "action" (the player types which they pick).
+  A choice is NOT a dice_check — the player has no way to answer an either/or question with a die.
+- A "dice_check" is for ONE specific action the player has effectively already committed to, whose
+  SUCCESS is uncertain. Its prompt_text must name that single action: "Roll {dX} to <do the specific
+  thing>" (e.g. "Roll d6 to disarm the device", "Roll d10 to leap the gap before it closes").
+- A dice_check prompt_text must NOT contain an either/or, a "do you…?" question, or the word "or"
+  joining two different actions. If you catch yourself offering options, switch the type to "action".
+- Do NOT use the die to "decide" a choice for the player (e.g. "roll to decide if you act with
+  resolve"). The player makes choices; the die only resolves whether a chosen action succeeds.
+
 DICE CHECK RULES (when using dice_check type):
 - ALWAYS single die roll (either d6 or d10)
 - Choose dice type based on difficulty:
@@ -1553,7 +1686,7 @@ INVENTORY CHANGES (inventory_changes array):
   * Current inventory list shows what they have entering this scene
   * Don't remove items that were used in previous scenes - they're already gone
   * EXAMPLES:
-    - Gained NEW items: {"character_name": "Theron", "items_added": ["Magic Sword"], "items_removed": []}
+    - Gained NEW items: {"character_name": "Theron", "items_added": [{"name": "Magic Sword", "purpose": "A blade that cuts through enchanted armor — use it against warded foes"}], "items_removed": []}
     - Lost/used item NOW: {"character_name": "Elara", "items_added": [], "items_removed": ["Rope"]}
     - No change: Don't include character in array
 
@@ -1616,6 +1749,15 @@ CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
 CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
 - Include assets_present array listing ALL important NPCs and objects in the scene
 - Important assets are: Named NPCs, significant objects, key locations that should be visually consistent
+- MANDATORY — REGISTER EVERYONE YOU DEPICT (this is what keeps them looking the same):
+  * EVERY named NPC or creature that appears in scene_text or visual_description MUST
+    have an entry in assets_present — INCLUDING the very first scene they appear in.
+  * NEVER describe or draw a named character in a scene without adding them to
+    assets_present. Their first entry is what generates their reference portrait; if
+    you omit them on first appearance they will look DIFFERENT in every later scene.
+  * Use ONE stable canonical name for each character for the whole adventure: no
+    leading "The", no honorifics added or dropped between scenes, identical spelling
+    and hyphenation every time (e.g. always "Echo-Child", never also "The Echo Child").
 - CRITICAL: PARTY MEMBERS ARE ASSETS TOO:
   * ALL party member characters are pre-registered as assets (type: "npc")
   * When party members appear in a scene, ALWAYS include them in assets_present
@@ -1724,7 +1866,7 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
   "inventory_changes": [
     {
       "character_name": "Character Name",
-      "items_added": ["New Item 1", "New Item 2"],
+      "items_added": [{"name": "New Item", "purpose": "what it does and when to use it"}],
       "items_removed": ["Used Item"]
     }
   ],
@@ -1778,14 +1920,34 @@ NARRATION VOICE & RHYTHM (scene_text is read aloud by a text-to-speech narrator)
   * Lean on short sentences and periods at moments of tension; longer clauses read calmer.
 - Avoid run-on sentences strung together with only commas — they read flat and breathless aloud.
 - End every sentence with terminal punctuation (. ! ? or …).
+- Refer to each PARTY MEMBER with the pronouns matching their stated Gender in the PARTY CHARACTER SHEETS.
+
+PLAYER CHARACTERS SPEAK FOR THEMSELVES (do NOT voice them):
+- The party members in PARTY CHARACTER SHEETS are PLAYER characters. Their words belong to the
+  players, not to you.
+- NEVER write dialogue or quoted speech for a party member in scene_text, and NEVER emit a
+  narration_segment whose speaker is a party member. Describe their actions, reactions, expressions
+  and presence in Narrator prose instead ("Kaelia raises her blade" — yes; "Kaelia says '...'" — NO).
+- NPCs and other non-party characters may speak freely.
+
+MAKE THE PARTY'S ITEMS MATTER:
+- Each hero's Inventory in PARTY CHARACTER SHEETS lists items as "Name (purpose)". Read them.
+- When a situation fits an item's stated purpose, create a clear opportunity to use it and make it
+  legible to the player — reference it in scene_text or the prompt (e.g. present a mechanical lock
+  when someone carries lockpicks, a warded door when someone has ward-piercing oil). Don't force an
+  item every scene, but let items pay off over the adventure instead of sitting unused.
+- When a player's action uses an item as intended, honor it in the outcome; if the item is spent,
+  list its name in inventory_changes.items_removed.
+- Any NEW item you grant via inventory_changes.items_added MUST include a plain name AND a
+  one-sentence purpose — never a cryptic name with no explanation.
 
 CRITICAL RULES FOR NARRATION SEGMENTS (for the voiced audiobook):
 - Break scene_text into an ordered list of narration_segments covering the ENTIRE scene in reading order.
 - Descriptive prose (anything that is NOT direct speech) -> speaker "Narrator", gender "unknown".
-- Each piece of direct speech -> a separate segment whose speaker is the EXACT name of the
-  character/NPC saying it (match party member and existing asset names when it's one of them; for a
-  minor unnamed speaker use a short label like "Guard" or "Innkeeper"). Put the spoken words in "text"
-  WITHOUT the surrounding quotation marks, and set gender to "male", "female", or "unknown".
+- Each piece of NPC direct speech -> a separate segment whose speaker is the EXACT name of the
+  NPC saying it (match existing asset names when it's one of them; for a minor unnamed speaker use a
+  short label like "Guard" or "Innkeeper"). Put the spoken words in "text" WITHOUT the surrounding
+  quotation marks, and set gender to "male", "female", or "unknown". Party members are NEVER speakers.
 - Preserve the original wording; do NOT invent new lines. This is just scene_text split by speaker.
 - Merge consecutive same-speaker prose into one segment; keep each distinct speech as its own segment.
 
@@ -1948,13 +2110,14 @@ async def generate_opening_scene(
     character_sheets = "\n\n".join(
         [
             f"**{char.name}**\n"
+            f"- Gender: {getattr(char, 'gender', 'unspecified')} (use matching pronouns)\n"
             f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
             f"- Health: {char.current_health}/{char.maximum_health}\n"
             f"- Backstory: {char.backstory}\n"
             f"- Appearance: {char.appearance}\n"
             f"- Personality: {char.personality}\n"
             f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
-            f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'}"
+            f"- Inventory: {_format_inventory(char.inventory)}"
             for char in characters
         ]
     )
@@ -2157,13 +2320,14 @@ async def generate_next_scene(
     character_sheets = "\n\n".join(
         [
             f"**{char.name}** (Current State Entering Scene {next_id})\n"
+            f"- Gender: {getattr(char, 'gender', 'unspecified')} (use matching pronouns)\n"
             f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
             f"- Health: {char.current_health}/{char.maximum_health} (this is their CURRENT health, don't subtract from it again)\n"
             f"- Backstory: {char.backstory}\n"
             f"- Appearance: {char.appearance}\n"
             f"- Personality: {char.personality}\n"
             f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
-            f"- Inventory: {', '.join(char.inventory) if char.inventory else 'None'} (current items, don't remove again unless used in THIS scene)"
+            f"- Inventory: {_format_inventory(char.inventory)} (current items, don't remove again unless used in THIS scene)"
             for char in characters
         ]
     )

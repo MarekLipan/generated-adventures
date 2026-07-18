@@ -786,6 +786,7 @@ class FluxKleinImageGenerator(ImageGenerator):
                 settings.FLUX_KLEIN_MODEL,
                 torch_dtype=self.torch_dtype,
                 token=hf_token,
+                local_files_only=settings.IMAGE_HF_OFFLINE,
             )
 
             if settings.IMAGE_ENABLE_CPU_OFFLOAD and self.device != "cpu":
@@ -870,6 +871,8 @@ class FluxKleinImageGenerator(ImageGenerator):
 
         model = settings.FLUX_KLEIN_MODEL
 
+        offline = settings.IMAGE_HF_OFFLINE
+
         logger.info(f"Loading Klein transformer ({klein_quant}) via bitsandbytes...")
         transformer = Flux2Transformer2DModel.from_pretrained(
             model,
@@ -877,6 +880,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             quantization_config=_diffusers_cfg(),
             torch_dtype=self.torch_dtype,
             token=hf_token,
+            local_files_only=offline,
         )
         gc.collect()
 
@@ -887,6 +891,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             quantization_config=_transformers_cfg(),
             torch_dtype=self.torch_dtype,
             token=hf_token,
+            local_files_only=offline,
         )
         gc.collect()
 
@@ -896,6 +901,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             text_encoder=text_encoder,
             torch_dtype=self.torch_dtype,
             token=hf_token,
+            local_files_only=offline,
         )
 
     def _finalize_vae(self) -> None:
@@ -1017,17 +1023,17 @@ class FluxKleinImageGenerator(ImageGenerator):
                     else:
                         logger.warning(f"Reference image not found: {p}")
 
-                # Reference resolution drives how much facial detail (e.g. glasses)
-                # survives into the scene. A single reference (typical solo hero)
-                # can afford a higher, proven-safe size on a 10GB card; multiple
-                # references scale down to stay within VRAM (attention cost grows
-                # ~quadratically and multi-ref @768 triggers driver paging).
+                # Reference resolution drives how much identity (face, outfit,
+                # gear) survives into the scene. The scene builder already caps and
+                # prioritizes references (IMAGE_MAX_SCENE_REFERENCES), so we can
+                # afford higher sizes here for coherence: 1–2 references at 768,
+                # and 3 at the configured floor (640 by default). Higher = slower
+                # (attention grows ~quadratically; multi-ref pages on a 10GB card)
+                # but far more consistent characters — the intended trade.
                 if self.device == "mps":
                     ref_size = settings.FLUX_KLEIN_MPS_REFERENCE_SIZE
-                elif len(existing) <= 1:
+                elif len(existing) <= 2:
                     ref_size = max(settings.FLUX_KLEIN_REFERENCE_SIZE, 768)
-                elif len(existing) == 2:
-                    ref_size = max(settings.FLUX_KLEIN_REFERENCE_SIZE, 640)
                 else:
                     ref_size = settings.FLUX_KLEIN_REFERENCE_SIZE
 

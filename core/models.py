@@ -2,14 +2,42 @@
 
 import uuid
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 # Type aliases for strict field validation
 GameStatus = Literal["ongoing", "completed", "failed"]
 PromptTypeEnum = Literal["dialogue", "action", "dice_check"]
 DiceType = Literal["d6", "d10"]
+
+
+class InventoryItem(BaseModel):
+    """A carried item with a plain name and a clear, player-facing purpose.
+
+    The purpose is what tells the player (and the DM) what the item is for and
+    when to use it — the missing piece that made bare item names feel cryptic.
+    """
+
+    name: str = Field(
+        ..., description="Short, plain item name (e.g. 'Clockwork Lockpicks')"
+    )
+    purpose: str = Field(
+        "",
+        description="One concise sentence: what the item does and when it helps in play "
+        "(e.g. 'Opens mechanical locks and disarms clockwork traps').",
+    )
+
+
+def _coerce_inventory_item(v):
+    """Accept a bare string as an item name (older saves / terse LLM output)."""
+    if isinstance(v, str):
+        return {"name": v, "purpose": ""}
+    return v
+
+
+# Inventory field element: a structured item, but tolerant of legacy string form.
+InvItem = Annotated[InventoryItem, BeforeValidator(_coerce_inventory_item)]
 ArtStyle = Literal["painterly_hero", "artstation_realism"]
 
 
@@ -135,6 +163,11 @@ class Character(BaseModel):
     """Represents a single character in the game."""
 
     name: str
+    gender: Literal["male", "female", "nonbinary", "unspecified"] = Field(
+        "unspecified",
+        description="Character's gender, so narration uses the correct pronouns. "
+        "Player-chosen during hero creation.",
+    )
     strength: int = Field(
         ..., description="Character's strength attribute", ge=0, le=20
     )
@@ -155,8 +188,9 @@ class Character(BaseModel):
         default_factory=list,
         description="List of skills and abilities the character possesses",
     )
-    inventory: List[str] = Field(
-        default_factory=list, description="List of items the character carries"
+    inventory: List[InvItem] = Field(
+        default_factory=list,
+        description="Items the character carries, each with a name and a clear purpose",
     )
     image_path: Optional[str] = Field(
         None, description="Path to the character's generated portrait"
@@ -416,9 +450,12 @@ class GeneratedCharacter(BaseModel):
         ...,
         description="3-5 skills or abilities the character possesses (e.g., 'Lockpicking', 'Persuasion', 'Swordsmanship', 'Arcane Knowledge', 'Tracking')",
     )
-    inventory: List[str] = Field(
+    inventory: List[InvItem] = Field(
         ...,
-        description="3-5 items the character carries (weapons, tools, magical items, etc.)",
+        description="3-4 starting items. Give each a PLAIN, non-cryptic name AND a one-sentence "
+        "purpose making clear what it does and when the player would use it. Prefer a few "
+        "obviously-useful items (a weapon, a tool tied to a skill, one situational item) over "
+        "flavorful-but-opaque trinkets.",
     )
 
 
@@ -471,13 +508,14 @@ class CharacterInventoryChange(BaseModel):
     character_name: str = Field(
         ..., description="Name of the character whose inventory changed"
     )
-    items_added: List[str] = Field(
+    items_added: List[InvItem] = Field(
         default_factory=list,
-        description="Items gained in this scene (e.g., ['Magic Sword', 'Health Potion'])",
+        description="Items gained in this scene, each with a name AND a one-sentence purpose "
+        "(what it does / when to use it).",
     )
     items_removed: List[str] = Field(
         default_factory=list,
-        description="Items lost or consumed in this scene (e.g., ['Rope', 'Torch'])",
+        description="Names of items lost or consumed in this scene (e.g., ['Rope', 'Torch'])",
     )
 
 
