@@ -12,6 +12,7 @@ Replaces the old "generate 6 full characters, pick N" flow. Instead:
 import asyncio
 import logging
 import pathlib
+import re
 
 from nicegui import ui
 
@@ -22,6 +23,36 @@ from .character_display import render_character_cards
 from .party import show_character_overview  # type: ignore
 
 logger = logging.getLogger()
+
+_NAME_TITLE_WORDS = {"the", "of", "a", "an", "and"}
+
+
+def _rename_in_text(text: str, old_name: str, new_name: str) -> str:
+    """Replace an old character name with a new one throughout a lore string.
+
+    Handles the full name ("Archivist Thaddeus" -> "Archivist Baxx") and also the
+    bare personal name the lore tends to use ("Thaddeus" -> "Baxx"), so a renamed
+    hero doesn't read as two different characters.
+    """
+    if not text or not old_name or old_name.strip() == new_name.strip():
+        return text
+
+    # Full name first (word-boundary, case-insensitive).
+    text = re.sub(rf"\b{re.escape(old_name.strip())}\b", new_name.strip(), text, flags=re.IGNORECASE)
+
+    # Then map name tokens unique to the OLD name onto those unique to the NEW one
+    # (e.g. "Thaddeus" -> "Baxx"), leaving shared titles like "Archivist" untouched.
+    old_toks = [t for t in re.findall(r"[A-Za-z']+", old_name) if t.lower() not in _NAME_TITLE_WORDS]
+    new_toks = [t for t in re.findall(r"[A-Za-z']+", new_name) if t.lower() not in _NAME_TITLE_WORDS]
+    new_lower = {t.lower() for t in new_toks}
+    old_lower = {t.lower() for t in old_toks}
+    old_only = [t for t in old_toks if t.lower() not in new_lower]
+    new_only = [t for t in new_toks if t.lower() not in old_lower]
+    if old_only and new_only:
+        repl = new_only[0]
+        for tok in old_only:
+            text = re.sub(rf"\b{re.escape(tok)}\b", repl, text, flags=re.IGNORECASE)
+    return text
 
 # Art styles offered at the start of a scenario. Keys must match core.models.ArtStyle.
 ART_STYLE_OPTIONS = [
@@ -437,7 +468,16 @@ async def _confirm_hero(
 ):
     """Lock in a hero and move to the next player or the party overview."""
     if final_name and final_name.strip():
-        hero.name = final_name.strip()
+        new_name = final_name.strip()
+        old_name = hero.name
+        if new_name != old_name:
+            # Renaming only hero.name leaves the generated lore referring to the
+            # old name, which makes the DM treat it as a second character. Rewrite
+            # the name across the lore so the hero stays a single, consistent person.
+            hero.backstory = _rename_in_text(hero.backstory, old_name, new_name)
+            hero.appearance = _rename_in_text(hero.appearance, old_name, new_name)
+            hero.personality = _rename_in_text(hero.personality, old_name, new_name)
+        hero.name = new_name
 
     game_flow.add_character(game_id, hero)
     chosen_archetypes.add(archetype.name)

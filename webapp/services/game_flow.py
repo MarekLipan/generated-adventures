@@ -31,8 +31,13 @@ async def get_scenario_pool() -> List[ScenarioTemplate]:  # type: ignore
     return persistence.load_all_scenario_templates()
 
 
-async def generate_new_scenario() -> ScenarioTemplate:  # type: ignore
-    """Generate a new scenario template with contrastive prompting.
+def scenario_theme_options() -> dict[str, str]:
+    """{key: label} genre choices for the scenario picker."""
+    return generator.scenario_theme_options()
+
+
+async def generate_new_scenario(theme: str = "any") -> ScenarioTemplate:  # type: ignore
+    """Generate a new scenario template, optionally steered to a genre/theme.
 
     Returns the newly created ScenarioTemplate.
     """
@@ -40,7 +45,9 @@ async def generate_new_scenario() -> ScenarioTemplate:  # type: ignore
     existing_scenarios = persistence.load_all_scenario_templates()
 
     # Generate new scenario
-    new_scenario = await generator.generate_scenario_template(existing_scenarios)
+    new_scenario = await generator.generate_scenario_template(
+        existing_scenarios, theme=theme
+    )
 
     # Save it
     persistence.save_scenario_template(new_scenario)

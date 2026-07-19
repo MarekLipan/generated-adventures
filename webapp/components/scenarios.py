@@ -3,6 +3,7 @@ import logging
 
 from nicegui import ui
 
+from core.config import settings  # type: ignore
 from webapp.services import game_flow  # type: ignore
 from webapp.utils import show_api_error, show_loading  # type: ignore
 
@@ -39,12 +40,26 @@ async def show_scenarios(main_container, game_id: str):
         with ui.card().classes("fantasy-panel w-full"):
             with ui.row().classes("w-full items-center justify-between mb-6"):
                 ui.label("🗺️ Choose Your Adventure").classes("text-h4")
-                ui.button(
-                    "✨ Generate New Scenario",
-                    on_click=lambda: asyncio.create_task(
-                        generate_and_add_new_scenario(main_container, game_id)
-                    ),
-                ).classes("fantasy-accent-gold")
+                with ui.row().classes("items-center gap-3"):
+                    theme_options = game_flow.scenario_theme_options()
+                    default_theme = (
+                        settings.SCENARIO_DEFAULT_THEME
+                        if settings.SCENARIO_DEFAULT_THEME in theme_options
+                        else "any"
+                    )
+                    genre_select = (
+                        ui.select(theme_options, value=default_theme, label="Genre")
+                        .props("outlined dense options-dense")
+                        .classes("w-52")
+                    )
+                    ui.button(
+                        "✨ Generate New Scenario",
+                        on_click=lambda: asyncio.create_task(
+                            generate_and_add_new_scenario(
+                                main_container, game_id, genre_select.value
+                            )
+                        ),
+                    ).classes("fantasy-accent-gold")
 
             if not scenario_pool:
                 ui.label(
@@ -56,9 +71,13 @@ async def show_scenarios(main_container, game_id: str):
                         with ui.card().classes(
                             "scenario-card w-full hover:shadow-lg transition-shadow"
                         ):
-                            ui.label(scenario.name).classes(
-                                "text-h6 font-bold fantasy-text-gold mb-2"
-                            )
+                            with ui.row().classes("items-center gap-2 mb-2"):
+                                ui.label(scenario.name).classes(
+                                    "text-h6 font-bold fantasy-text-gold"
+                                )
+                                genre = getattr(scenario, "genre", "") or ""
+                                if genre:
+                                    ui.label(genre).classes("genre-badge")
                             ui.label(scenario.one_liner).classes("text-base mb-3")
 
                             with ui.row().classes("items-center gap-4"):
@@ -77,8 +96,10 @@ async def show_scenarios(main_container, game_id: str):
                                 ).classes("ml-auto")
 
 
-async def generate_and_add_new_scenario(main_container, game_id: str):
-    """Generate a new scenario and add it to the pool."""
+async def generate_and_add_new_scenario(
+    main_container, game_id: str, theme: str = "any"
+):
+    """Generate a new scenario (optionally steered to a genre) and add it to the pool."""
     show_loading(
         main_container,
         "✨ Generating New Scenario...",
@@ -86,8 +107,8 @@ async def generate_and_add_new_scenario(main_container, game_id: str):
     )
 
     try:
-        new_scenario = await game_flow.generate_new_scenario()
-        logger.info(f"New scenario generated: {new_scenario.name}")
+        new_scenario = await game_flow.generate_new_scenario(theme=theme)
+        logger.info(f"New scenario generated ({theme}): {new_scenario.name}")
 
         # Refresh the scenario list (which will show the new scenario)
         await show_scenarios(main_container, game_id)
@@ -100,7 +121,7 @@ async def generate_and_add_new_scenario(main_container, game_id: str):
             title="Error Generating Scenario",
             message="The Dungeon Master encountered an issue while creating a new adventure.",
             retry_callback=lambda: asyncio.create_task(
-                generate_and_add_new_scenario(main_container, game_id)
+                generate_and_add_new_scenario(main_container, game_id, theme)
             ),
         )
 

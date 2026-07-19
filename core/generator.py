@@ -887,22 +887,70 @@ async def generate_hero(
     )
 
 
+#: Genre/theme steering for scenario generation. Key -> (UI label, prompt steering).
+#: "any" keeps the original maximal-variety behavior (no genre constraint).
+SCENARIO_THEMES: dict[str, tuple[str, str]] = {
+    "classic_fantasy": (
+        "Classic Fantasy",
+        "Set this adventure firmly in CLASSIC HEROIC FANTASY — the old Dungeons & Dragons "
+        "tradition: a medieval sword-and-sorcery world of kingdoms and untamed wilds, taverns "
+        "and torch-lit dungeons, castles and ancient ruins; wizards, clerics, rogues and "
+        "knights; goblins, orcs, trolls, undead, cults and dragons; enchanted blades and dusty "
+        "spellbooks. Keep an earnest tone of heroic adventure. Do NOT drift into science-fiction, "
+        "steampunk/clockwork, modern, post-apocalyptic, or otherwise non-medieval-fantasy settings.",
+    ),
+    "dark_fantasy": (
+        "Dark Fantasy",
+        "Set this in GRIM, GOTHIC DARK FANTASY — still a medieval fantasy world, but bleak and "
+        "ominous: cursed lands, plague and dread, morally grey choices, monstrous horrors and "
+        "desperate stakes. Sword-and-sorcery, never sci-fi or steampunk.",
+    ),
+    "mystery_intrigue": (
+        "Mystery & Intrigue",
+        "Set this as a FANTASY MYSTERY or political intrigue in a medieval-fantasy world: "
+        "investigation, hidden secrets, scheming factions and betrayal, favoring social and "
+        "deductive challenges over constant combat. Keep it medieval fantasy, not sci-fi.",
+    ),
+    "any": (
+        "Surprise Me (any genre)",
+        "",
+    ),
+}
+
+
+def scenario_theme_options() -> dict[str, str]:
+    """{key: label} for the scenario genre picker."""
+    return {key: label for key, (label, _steer) in SCENARIO_THEMES.items()}
+
+
 async def generate_scenario_template(
     existing_scenarios: List[ScenarioTemplate],
+    theme: str = "any",
 ) -> ScenarioTemplate:
     """Generates a complete new scenario template with contrastive prompting.
 
     Args:
         existing_scenarios: List of all existing scenario templates (both played and unplayed)
                           to ensure the new scenario is distinct and original
+        theme: Genre steering key from SCENARIO_THEMES. When a specific genre is chosen,
+               novelty is sought WITHIN that genre rather than by switching setting/era.
 
     Returns:
         ScenarioTemplate object with name, one_liner, and full DM notes
     """
     agent = _text_agent(GeneratedScenarioTemplate)
 
+    theme_key = theme if theme in SCENARIO_THEMES else "any"
+    _label, theme_steering = SCENARIO_THEMES[theme_key]
+    themed = bool(theme_steering)
+
     logger.info(
-        f"Generating new scenario template (contrasting with {len(existing_scenarios)} existing scenarios)..."
+        f"Generating new scenario template (theme={theme_key}, contrasting with "
+        f"{len(existing_scenarios)} existing scenarios)..."
+    )
+
+    theme_section = (
+        f"\nGENRE / THEME — follow this closely:\n{theme_steering}\n" if themed else ""
     )
 
     # Build contrastive prompt with existing scenarios
@@ -918,11 +966,28 @@ async def generate_scenario_template(
                 f"Times Played: {scenario.times_played}\n"
                 f"DM Notes Preview: {scenario.dm_notes[:300]}..."
             )
+        summaries = chr(10).join(scenario_summaries)
 
-        contrastive_context = f"""
+        if themed:
+            # Stay in the chosen genre; find novelty WITHIN it (do not change era/world-type).
+            contrastive_context = f"""
+EXISTING SCENARIOS (make your new one a genuinely fresh adventure, but STAY in the genre above):
+
+{summaries}
+
+Keep the GENRE, era and world-type fixed — that is deliberate, not a limitation. Put ALL of your
+originality into the things that actually make an adventure feel new:
+- a distinct PLOT and story arc (never a reskin of an existing one),
+- a different QUEST STRUCTURE (e.g. rescue, heist, mystery, escort, siege, ritual, hunt, exploration),
+- fresh CHARACTERS and factions, and a new ANTAGONIST with their own motive,
+- new KEY LOCATIONS and a different central CONFLICT and mood — still within the genre.
+Do NOT reach for novelty by changing the setting type, era, or genre.
+"""
+        else:
+            contrastive_context = f"""
 EXISTING SCENARIOS (create something DISTINCTLY DIFFERENT):
 
-{chr(10).join(scenario_summaries)}
+{summaries}
 
 CRITICAL: Your new scenario MUST differ in at least 3 major aspects:
 1. Setting type/era (medieval village, space station, underwater city, floating islands, etc.)
@@ -936,10 +1001,15 @@ Analyze the patterns in existing scenarios and deliberately create something nov
 
     prompt = f"""
 You are a creative fantasy adventure designer creating scenarios for a D&D-style tabletop RPG.
-
+{theme_section}
 {contrastive_context}
 
 Generate a COMPLETE scenario with the following components:
+
+0. **genre**: A short 1-3 word genre/tone label for the scenario you are creating (e.g. "Classic
+   Fantasy", "Dark Fantasy", "Fantasy Mystery", "Steampunk"). It must match the GENRE/THEME above
+   when one is given.
+
 
 1. **name**: A compelling, memorable scenario name (3-7 words)
    - Examples: "The Curse of Ravenmoor", "Heist at the Skyport", "Whispers from the Deep"
@@ -993,13 +1063,19 @@ Make it playable, fun, and full of opportunities for player choice and creativit
         f"## Important NPCs\n\n{generated.important_npcs}\n"
     )
 
+    # Genre label: when a specific theme was chosen, that IS the genre; otherwise
+    # use the tag the model assigned to what it actually produced.
+    genre = _label if themed else (getattr(generated, "genre", "") or "").strip()
+
     # Create ScenarioTemplate object
     scenario_template = ScenarioTemplate(
         name=generated.name,
+        genre=genre,
         one_liner=generated.one_liner,
         dm_notes=dm_notes,
     )
 
+    logger.info(f"Genre: {genre}")
     return scenario_template
 
 
@@ -1605,10 +1681,26 @@ After the scene narrative, provide a prompt for player interaction. The prompt s
   * dice_check: Player must roll dice (for ANY risky action, test of skill, or combat)
 
 CRITICAL RULES FOR PROMPT TYPES - VARY THE PROMPTS:
-- DO NOT use dice_check for every scene - mix dialogue, action, and dice_check
+- DO NOT use dice_check for every scene - mix dialogue, action, dice_check, and party_choice
 - Use dialogue when: characters need to talk to NPCs, negotiate, roleplay conversations
 - Use action for: simple tasks, exploration without immediate danger, planning, easy skill checks, or coordinated team efforts
 - Use dice_check for: combat, risky actions, difficult skill checks, life-or-death situations
+- Use party_choice for: a genuine SHARED direction/logistics fork the whole group commits to together
+  (which route, accept or refuse an offer, rest or press on, which lead to follow). Provide 2-4
+  short, distinct options; the group picks ONE with a single click.
+  * party_choice is for DIRECTION, never for expression: do NOT turn roleplay, dialogue, or a
+    character's personal action into multiple choice — those stay open-ended (dialogue/action).
+  * A party_choice addresses the whole party, so it does not need a single target character.
+
+SPOTLIGHT — GIVE EVERY PLAYER SPACE (avoid one player driving everything):
+- For individual prompts (action/dialogue/dice_check), usually spotlight ONE character by name and
+  ROTATE who that is from scene to scene, weaving it naturally into the story so different party
+  members get their moments. Do NOT default to prompting the whole party open-endedly — that lets a
+  single player answer for everyone.
+- Only target MULTIPLE characters at once (target_characters) when several genuinely act in the same
+  instant (e.g. a combat round where each rolls). Otherwise prefer one rotating spotlight.
+- When the decision is truly the group's shared fork, use party_choice (options) instead of an
+  open-ended "what does the party do?".
 
 CHOICE vs. ROLL — NEVER MIX THEM (this is critical for a coherent UI):
 - If you are offering the player a CHOICE between courses of action ("do you descend OR hesitate?",
@@ -1631,29 +1723,22 @@ DICE CHECK RULES (when using dice_check type):
 - Each character targeted will roll their own single die
 
 TARGETING RULES (CRITICAL - READ CAREFULLY):
-For dice_check prompts specifically:
-  * ALWAYS specify target_character (single name) OR target_characters (array of names)
-  * NEVER use target_character: null for dice_check prompts - this causes confusion about who rolls
-  * If one character should attempt the check, use target_character with their name
-    - Example: "target_character": "Theron the Brave" (use the ACTUAL character name from the party)
-  * If multiple specific characters should roll simultaneously, use target_characters array
-    - Example: "target_characters": ["ActualName1", "ActualName2"] (use ACTUAL names from the party roster)
-  * If the situation is "any character could volunteer," pick the most suitable character based on their skills/stats
-    - Example: For persuasion, pick the character with highest Intelligence or relevant skills
-  * Make your prompt_text match your targeting:
-    - Single target: "[CharacterName], roll d10 to persuade the elder" (use their actual name)
-    - Multiple targets: "[Name1] and [Name2], both roll d6 for your attacks" (use their actual names)
-
-For action prompts:
-  * Can use target_character for single character actions
-  * Can use target_characters for coordinated multi-character actions (e.g., "[Name1] searches left, [Name2] searches right" - use actual party member names)
-  * Use target_character: null when the entire party acts together
-
-For dialogue prompts:
-  * Use target_character with a name to address a specific character
-  * Use target_character: null when the entire party speaks/responds
-  
-CRITICAL: For ANY dice_check prompt, you MUST set either target_character (string) or target_characters (array). Never null.
+ALWAYS address specific, named PARTY MEMBERS — never a faceless "the party". Every prompt (of any
+type) MUST set either target_character (one exact party name) or target_characters (an array of
+exact party names). NEVER leave both null, and never write "the party" / "you all" / "everyone" as
+if the group were one person.
+  * SOLO adventures (only ONE party member): ALWAYS set target_character to that single hero's exact
+    name, for EVERY prompt. Address them by name — "Julian, what do you do?" — never "Party, what do
+    you do?". There is no group; there is one named character.
+  * When ONE character is the natural focus, use target_character with their exact name.
+  * When several/all should act at once, use target_characters listing each exact party name; each of
+    those players will answer for their OWN character, so phrase prompt_text so every named character
+    knows what they are deciding (e.g. "Kael, Bram — how does each of you meet the charge?").
+  * prompt_text must NAME who is being addressed and ask what THEIR character does/says/rolls. Use
+    the ACTUAL names from PARTY CHARACTER SHEETS. Examples:
+    - "Theron, roll d10 to persuade the elder"
+    - "Lyra and Doran, both roll d6 for your attacks"
+    - "Mira, do you open the vault or guard the door?"
 
 CRITICAL RULES FOR CHARACTER CHANGES (SIMPLIFIED APPROACH):
 - The character sheets show CURRENT states as characters ENTER this scene
@@ -1850,11 +1935,12 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
   "scene_text": "The vivid narrative of the scene...",
   "visual_description": "COMPREHENSIVE visual description for image generation (8-12+ sentences with detailed camera angle, each character's position/pose/expression, all visible objects/NPCs placement, environment details, lighting setup, and atmosphere)...",
   "prompt": {
-    "type": "dialogue" | "action" | "dice_check",
+    "type": "dialogue" | "action" | "dice_check" | "party_choice",
     "dice_type": "d6" | "d10" (only if type is dice_check, always single die roll),
-    "target_character": "Character Name" (REQUIRED for single dice_check, optional for action/dialogue) or null,
-    "target_characters": ["Char1", "Char2"] (for multi-character dice_check or action) or null,
-    "prompt_text": "The question or instruction for the player(s)"
+    "target_character": "Character Name" (a concrete party name; REQUIRED for dice_check and the usual case for action/dialogue — rotate who; null only for party_choice) ,
+    "target_characters": ["Char1", "Char2"] (only when several characters act in the SAME instant) or null,
+    "options": ["Option A", "Option B", "Option C"] (REQUIRED for party_choice: 2-4 short distinct choices; null otherwise),
+    "prompt_text": "The question or instruction, addressed to the named character(s) by name"
   },
   "health_changes": [
     {

@@ -1,0 +1,295 @@
+/* ============================================================================
+   Generated Adventures — Fantasy Theme
+   A candlelit-tome aesthetic for D&D-style play: aged gold on deep ink,
+   parchment/leather panels, Cinzel display + serif body, ornate flourishes.
+   All class hooks (fantasy-panel, fantasy-text-gold, ornate-divider,
+   character-card, stat chips, HP bars, etc.) are consumed by the NiceGUI
+   components in webapp/components/.
+   ============================================================================ */
+
+:root {
+  --ink:        #15110c;   /* deepest background */
+  --ink-2:      #1c1610;   /* raised background */
+  --parch:      #241c14;   /* panel base */
+  --parch-2:    #2b2116;   /* panel highlight */
+  --leather:    #1f1810;   /* button/field base */
+  --bronze:     #6f5630;   /* borders */
+  --bronze-lit: #8a6d3b;   /* stronger border / hover */
+  --gold:       #d4a54a;   /* primary accent */
+  --gold-soft:  #ecc879;   /* bright accent / headings */
+  --gold-deep:  #a97e34;   /* gradient shadow side */
+  --text:       #e9dfcc;   /* body text (warm parchment) */
+  --muted:      #a2947a;   /* secondary text */
+  --faint:      #7c6f58;   /* labels / captions */
+  --hp-good:    #7fae5a;
+  --hp-mid:     #d6a94b;
+  --hp-crit:    #cd5443;
+  --danger:     #c8503f;
+  --shadow:     0 14px 40px rgba(0,0,0,.55);
+  --font-display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  --font-body:    'EB Garamond', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+}
+
+/* ── Page ground: dark vignette + warm candle glow from above ─────────────── */
+body,
+.q-page,
+.nicegui-content {
+  background:
+    radial-gradient(1200px 620px at 50% -12%, rgba(212,165,74,.13), transparent 60%),
+    radial-gradient(900px 500px at 85% 8%, rgba(120,70,40,.10), transparent 55%),
+    linear-gradient(180deg, var(--ink-2), var(--ink)) !important;
+  background-attachment: fixed !important;
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+.nicegui-content { padding: 1.25rem 1rem 3rem; }
+
+/* Readable, story-weight body text everywhere by default */
+body { font-size: 16.5px; line-height: 1.6; }
+
+/* ── Typography helpers ───────────────────────────────────────────────────── */
+.game-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2rem, 5vw, 3.1rem);
+  letter-spacing: .06em;
+  background: linear-gradient(180deg, var(--gold-soft), var(--gold-deep));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 18px rgba(212,165,74,.25);
+  text-align: center;
+}
+
+.fantasy-text-gold,
+.fantasy-accent-gold {
+  color: var(--gold-soft) !important;
+  font-family: var(--font-display);
+  letter-spacing: .02em;
+}
+.fantasy-text-muted { color: var(--muted) !important; }
+
+/* Quasar heading sizes get the display face + gold when tagged */
+.text-h3, .text-h4, .text-h5, .text-h6 { font-family: var(--font-display); }
+
+/* ── Panels (fantasy-panel) — an aged parchment leaf bound in bronze ──────── */
+.fantasy-panel {
+  background:
+    linear-gradient(180deg, var(--parch-2), var(--parch)) padding-box,
+    linear-gradient(180deg, var(--bronze-lit), var(--bronze)) border-box;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255,238,200,.06);
+  padding: 1.4rem 1.6rem;
+  position: relative;
+}
+/* subtle inner keyline for a bound-page feel */
+.fantasy-panel::after {
+  content: "";
+  position: absolute; inset: 6px;
+  border: 1px solid rgba(138,109,59,.22);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+/* ── Ornate divider — a fading rule with a centered gold lozenge ──────────── */
+.ornate-divider {
+  position: relative;
+  height: 18px;
+  margin: 1.1rem 0;
+  background: linear-gradient(90deg, transparent, var(--bronze-lit), transparent);
+  background-size: 100% 1px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.ornate-divider::before {
+  content: "◆";
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--gold);
+  font-size: .8rem;
+  background: var(--parch);
+  padding: 0 .55rem;
+  text-shadow: 0 0 10px rgba(212,165,74,.5);
+}
+
+/* ── Scene narrative prose ────────────────────────────────────────────────── */
+.markdown {
+  font-family: var(--font-body);
+  font-size: 1.18rem;
+  line-height: 1.72;
+  color: var(--text);
+}
+.markdown p { margin: 0 0 1rem; }
+/* Storybook drop-cap on the opening paragraph */
+.markdown > p:first-of-type::first-letter {
+  font-family: var(--font-display);
+  font-size: 3.2rem;
+  line-height: .8;
+  float: left;
+  padding: .08em .12em 0 0;
+  color: var(--gold-soft);
+  text-shadow: 0 2px 10px rgba(212,165,74,.3);
+}
+.markdown em { color: var(--gold-soft); font-style: italic; }
+.markdown strong { color: #f2e6cc; }
+
+/* ── Character card / sheet ───────────────────────────────────────────────── */
+.character-card {
+  background:
+    linear-gradient(180deg, var(--parch-2), var(--parch)) padding-box,
+    linear-gradient(180deg, var(--bronze-lit), var(--bronze)) border-box;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.1rem 1.2rem;
+}
+.character-card .q-img,
+.character-card img { border: 1px solid var(--bronze); box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+
+/* Section label inside a sheet (e.g. Inventory / Skills) */
+.sheet-section-label {
+  font-family: var(--font-display);
+  font-size: .74rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: .1rem 0 .1rem;
+}
+
+/* ── Stat chips ───────────────────────────────────────────────────────────── */
+.stat-chip {
+  display: inline-flex; align-items: baseline; gap: .34rem;
+  background: rgba(0,0,0,.28);
+  border: 1px solid var(--bronze);
+  border-radius: 9px;
+  padding: .28rem .6rem;
+}
+.stat-chip .stat-ico { font-size: .95rem; }
+.stat-chip .stat-val {
+  font-weight: 700; font-size: 1.02rem; color: var(--gold-soft);
+  font-variant-numeric: tabular-nums;
+}
+.stat-chip .stat-key {
+  font-family: var(--font-display);
+  font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+}
+/* legacy small stat labels */
+.stat-label { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ── HP bar ───────────────────────────────────────────────────────────────── */
+.hp-bar {
+  position: relative;
+  height: 22px;
+  border-radius: 7px;
+  background: #0e0b07;
+  border: 1px solid var(--bronze);
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
+}
+.hp-bar-fill {
+  position: absolute; inset: 0 auto 0 0;
+  border-radius: 6px 0 0 6px;
+  transition: width .4s ease;
+  background: linear-gradient(180deg, var(--hp-good), #5d8a3e);
+}
+.hp-bar-fill.mid  { background: linear-gradient(180deg, var(--hp-mid), #a97e34); }
+.hp-bar-fill.crit { background: linear-gradient(180deg, var(--hp-crit), #9e3b2e); }
+.hp-bar-text {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .78rem; font-weight: 700; letter-spacing: .03em;
+  color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.85);
+  font-variant-numeric: tabular-nums;
+}
+.health-critical { color: var(--hp-crit) !important; font-weight: 700; }
+.health-good     { color: var(--hp-good) !important; font-weight: 700; }
+
+/* ── Inventory / skill chips ──────────────────────────────────────────────── */
+.inv-chip, .skill-chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: rgba(0,0,0,.24);
+  border: 1px solid var(--bronze);
+  border-radius: 20px;
+  padding: .22rem .66rem;
+  font-size: .86rem;
+  color: var(--text);
+}
+.skill-chip { border-color: var(--gold-deep); color: var(--gold-soft); }
+.inv-empty { color: var(--faint); font-style: italic; font-size: .86rem; }
+
+/* ── Buttons (Quasar q-btn) — aged leather with a gold rim ────────────────── */
+.q-btn:not(.q-btn--flat):not(.q-btn--round) {
+  background: linear-gradient(180deg, #35281a, var(--leather)) !important;
+  border: 1px solid var(--bronze-lit);
+  border-radius: 9px;
+  color: var(--gold-soft) !important;
+  font-family: var(--font-display);
+  letter-spacing: .03em;
+  text-transform: none;
+  box-shadow: 0 3px 12px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,235,190,.08);
+  transition: filter .15s ease, transform .1s ease, border-color .15s ease;
+}
+.q-btn:not(.q-btn--flat):not(.q-btn--round):hover {
+  filter: brightness(1.18);
+  border-color: var(--gold);
+}
+.q-btn:not(.q-btn--flat):not(.q-btn--round):active { transform: translateY(1px); }
+.q-btn--flat { color: var(--gold-soft) !important; }
+
+/* ── Inputs / number / text fields ────────────────────────────────────────── */
+.q-field__control {
+  background: rgba(0,0,0,.28) !important;
+  border-radius: 9px !important;
+}
+.q-field__control:before { border-color: var(--bronze) !important; }
+.q-field--focused .q-field__control:after { border-color: var(--gold) !important; }
+.q-field__native, .q-field__native::placeholder { color: var(--text) !important; }
+.q-field__label { color: var(--muted) !important; }
+
+/* ── Expansion (backstory toggle) ─────────────────────────────────────────── */
+.q-expansion-item {
+  border: 1px solid var(--bronze);
+  border-radius: 10px;
+  background: rgba(0,0,0,.18);
+  margin-top: .4rem;
+}
+.q-expansion-item .q-item__label { font-family: var(--font-display); color: var(--gold-soft); letter-spacing: .02em; }
+
+/* ── Loading message ──────────────────────────────────────────────────────── */
+.loading-message { color: var(--muted); font-family: var(--font-body); font-size: 1.05rem; }
+
+/* ── Audio player row: keep it snug and on-theme ──────────────────────────── */
+audio { filter: sepia(.25) saturate(1.1); border-radius: 8px; }
+
+/* ── Genre badge on scenario cards ────────────────────────────────────────── */
+.genre-badge {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-size: .64rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gold-soft);
+  background: rgba(212,165,74,.10);
+  border: 1px solid var(--gold-deep);
+  border-radius: 20px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+
+/* ── Scene image: cinematic banner framing ────────────────────────────────── */
+.scene-banner img, .scene-banner .q-img {
+  border: 1px solid var(--bronze-lit);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+/* ── Custom scrollbar ─────────────────────────────────────────────────────── */
+*::-webkit-scrollbar { width: 12px; height: 12px; }
+*::-webkit-scrollbar-track { background: var(--ink); }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--bronze-lit), var(--bronze));
+  border-radius: 8px; border: 2px solid var(--ink);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--gold-deep); }

@@ -8,7 +8,7 @@ from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 # Type aliases for strict field validation
 GameStatus = Literal["ongoing", "completed", "failed"]
-PromptTypeEnum = Literal["dialogue", "action", "dice_check"]
+PromptTypeEnum = Literal["dialogue", "action", "dice_check", "party_choice"]
 DiceType = Literal["d6", "d10"]
 
 
@@ -139,6 +139,10 @@ class ScenarioTemplate(BaseModel):
         description="Unique identifier for the scenario template",
     )
     name: str = Field(..., description="Name of the scenario")
+    genre: str = Field(
+        "",
+        description="Short genre/tone tag for the scenario (e.g. 'Classic Fantasy', 'Dark Fantasy')",
+    )
     one_liner: str = Field(
         ...,
         description="Short enticing description (1-2 sentences) to attract players without spoilers",
@@ -214,11 +218,18 @@ class PromptType(BaseModel):
 
     type: PromptTypeEnum = Field(
         ...,
-        description="Type of prompt: 'dialogue', 'action', 'dice_check'",
+        description="Type of prompt: 'dialogue', 'action', 'dice_check', or 'party_choice' "
+        "(a shared group decision offered as a few fixed options).",
     )
     dice_type: Optional[DiceType] = Field(
         None,
         description="Type of dice to roll if type is 'dice_check': 'd6' or 'd10'. Always single die roll.",
+    )
+    options: Optional[List[str]] = Field(
+        None,
+        description="For type 'party_choice' ONLY: 2-4 short, distinct courses of action the whole "
+        "party chooses between (e.g. ['Take the mountain pass', 'Follow the river road']). One is "
+        "picked with a single click. Do NOT use for roleplay/dialogue — only genuine group forks.",
     )
     target_character: Optional[str] = Field(
         None,
@@ -346,6 +357,11 @@ class GeneratedScenarioTemplate(BaseModel):
     """Represents AI-generated scenario template data."""
 
     name: str = Field(..., description="Name of the scenario")
+    genre: str = Field(
+        ...,
+        description="A short (1-3 word) genre/tone label for THIS scenario as written "
+        "(e.g. 'Classic Fantasy', 'Dark Fantasy', 'Fantasy Mystery', 'Steampunk').",
+    )
     one_liner: str = Field(
         ...,
         description="Short enticing description (1-2 sentences) to attract players without spoilers",

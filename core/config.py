@@ -177,6 +177,12 @@ class Settings(BaseSettings):
     # Gemini TTS voice name (used only when TTS_PROVIDER="gemini").
     GEMINI_TTS_VOICE: str = "Algieba"
 
+    # Default genre for the "Generate New Scenario" picker. One of the keys in
+    # core.generator.SCENARIO_THEMES ("classic_fantasy", "dark_fantasy",
+    # "mystery_intrigue", "any"). Defaults to classic sword-and-sorcery fantasy;
+    # pick "any" in the UI for maximal variety on a given generation.
+    SCENARIO_DEFAULT_THEME: str = "classic_fantasy"
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

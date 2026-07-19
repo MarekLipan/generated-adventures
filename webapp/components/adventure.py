@@ -330,45 +330,51 @@ async def start_adventure(main_container, game_id: str):
                     prompt_text = prompt.prompt_text
                     target_character = prompt.target_character
 
-                # Display the prompt
-                target_label = f"{target_character}" if target_character else "Party"
-                ui.label(f"🎯 {target_label}: {prompt_text}").classes(
+                # Resolve concrete target(s). There is no faceless "party" actor:
+                # every prompt is addressed to specific named character(s). If the
+                # model left the target unset, fall back to the whole roster so each
+                # player still acts as their own character (and a solo player is
+                # always addressed by name, never as "the Party").
+                party_names = [
+                    c.name for c in (game_state.characters if game_state else [])
+                ]
+                targets = list(getattr(prompt, "target_characters", None) or [])
+                targets = [t for t in targets if t]
+                if not targets and target_character:
+                    targets = [target_character]
+                if not targets:
+                    targets = party_names
+                if not targets:
+                    targets = ["You"]
+                is_multi = len(targets) > 1
+
+                # Display the prompt, addressed to the concrete character(s)
+                ui.label(f"🎯 {', '.join(targets)}: {prompt_text}").classes(
                     "text-lg font-semibold mb-4 fantasy-text-gold"
                 )
 
                 # Render appropriate input based on prompt type
                 action_input = None
-                character_dice_inputs = {}  # For multi-character dice checks
+                character_dice_inputs = {}  # Per-character inputs when >1 acts
+                party_choice_options = []  # Set for a party_choice (group fork)
 
                 if prompt_type == "dice_check":
-                    # Dice roll input - single die only
                     dice_display = (
                         prompt.dice_type if prompt and prompt.dice_type else "dice"
                     )
-
-                    # Check if this is a multi-character dice check
-                    has_multiple_targets = (
-                        prompt
-                        and hasattr(prompt, "target_characters")
-                        and prompt.target_characters
-                        and len(prompt.target_characters) > 1
-                    )
-
-                    if has_multiple_targets:
-                        # Multiple character dice inputs
+                    if is_multi:
                         ui.label(f"🎲 Each character rolls {dice_display}:").classes(
                             "text-sm fantasy-text-muted mb-3 stat-label"
                         )
-                        for char_name in prompt.target_characters:
+                        for char_name in targets:
                             character_dice_inputs[char_name] = ui.number(
                                 label=f"{char_name}'s Roll",
                                 placeholder=f"Enter {char_name}'s dice result",
                                 min=1,
                             ).classes("w-full mb-2")
                     else:
-                        # Single dice input
                         ui.label(
-                            f"🎲 Roll {dice_display} and enter the result:"
+                            f"🎲 {targets[0]} rolls {dice_display} — enter the result:"
                         ).classes("text-sm fantasy-text-muted mb-3 stat-label")
                         action_input = ui.number(
                             label="Dice Result",
@@ -377,45 +383,62 @@ async def start_adventure(main_container, game_id: str):
                         ).classes("w-full")
 
                 elif prompt_type == "dialogue":
-                    # Dialogue input - will be wrapped in quotes
-                    ui.label(
-                        "💬 Enter what your character says (quotes will be added automatically):"
-                    ).classes("text-sm fantasy-text-muted mb-3 stat-label")
-                    action_input = ui.input(
-                        label="Dialogue", placeholder="What do you say?"
-                    ).classes("w-full")
+                    if is_multi:
+                        ui.label(
+                            "💬 Each character says their line (quotes added automatically):"
+                        ).classes("text-sm fantasy-text-muted mb-3 stat-label")
+                        for char_name in targets:
+                            character_dice_inputs[char_name] = ui.input(
+                                label=f"{char_name} says",
+                                placeholder=f"What does {char_name} say?",
+                            ).classes("w-full mb-2")
+                    else:
+                        ui.label(
+                            f"💬 What does {targets[0]} say? (quotes added automatically)"
+                        ).classes("text-sm fantasy-text-muted mb-3 stat-label")
+                        action_input = ui.input(
+                            label="Dialogue", placeholder="What do you say?"
+                        ).classes("w-full")
+
+                elif prompt_type == "party_choice":
+                    party_choice_options = list(getattr(prompt, "options", None) or [])
+                    if party_choice_options:
+                        ui.label("🧭 The party decides together — choose one:").classes(
+                            "text-sm fantasy-text-muted mb-3 stat-label"
+                        )
+                    else:
+                        # No options supplied — degrade gracefully to an open action.
+                        ui.label(f"⚔️ What does {targets[0]} do?").classes(
+                            "text-sm fantasy-text-muted mb-3 stat-label"
+                        )
+                        action_input = ui.input(
+                            label="Action", placeholder="Describe your action"
+                        ).classes("w-full")
 
                 else:  # action
-                    # Check if this is a multi-character action
-                    has_multiple_targets = (
-                        prompt
-                        and hasattr(prompt, "target_characters")
-                        and prompt.target_characters
-                        and len(prompt.target_characters) > 1
-                    )
-
-                    if has_multiple_targets:
-                        # Multiple character action inputs
+                    if is_multi:
                         ui.label("⚔️ Each character describes their action:").classes(
                             "text-sm fantasy-text-muted mb-3 stat-label"
                         )
-                        for char_name in prompt.target_characters:
+                        for char_name in targets:
                             character_dice_inputs[char_name] = ui.input(
                                 label=f"{char_name}'s Action",
                                 placeholder=f"What does {char_name} do?",
                             ).classes("w-full mb-2")
                     else:
-                        # Standard single action input
-                        ui.label("⚔️ Describe your action:").classes(
+                        ui.label(f"⚔️ What does {targets[0]} do?").classes(
                             "text-sm fantasy-text-muted mb-3 stat-label"
                         )
                         action_input = ui.input(
-                            label="Action", placeholder="What do you do?"
+                            label="Action", placeholder="Describe your action"
                         ).classes("w-full")
 
-                async def on_submit(_e=None):
+                async def on_submit(_e=None, chosen=None):
+                    # A party_choice submits the picked option directly.
+                    if chosen is not None:
+                        player_action = chosen
                     # Handle multi-character prompts (dice checks or actions)
-                    if character_dice_inputs:
+                    elif character_dice_inputs:
                         # Format: "CharacterName1: value, CharacterName2: value"
                         responses = []
                         for char_name, input_field in character_dice_inputs.items():
@@ -468,7 +491,19 @@ async def start_adventure(main_container, game_id: str):
                             retry_callback=lambda: render_scene(game_state.scenes[-1]),
                         )
 
-                ui.button("⚔️ Submit", on_click=on_submit).classes("mt-4 mb-6 w-full")
+                if party_choice_options:
+                    with ui.column().classes("gap-2 w-full mt-4 mb-6"):
+                        for opt in party_choice_options:
+                            ui.button(
+                                opt,
+                                on_click=lambda _e=None, o=opt: asyncio.create_task(
+                                    on_submit(chosen=o)
+                                ),
+                            ).classes("w-full")
+                else:
+                    ui.button("⚔️ Submit", on_click=on_submit).classes(
+                        "mt-4 mb-6 w-full"
+                    )
 
             # Party Status section - after action input
             game_state = game_flow.get_game_state(game_id)
