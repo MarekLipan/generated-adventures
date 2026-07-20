@@ -628,6 +628,21 @@ Skills should match the character's background, stats, and archetype.
     return final_characters
 
 
+def _setting_only(dm_notes: Optional[str]) -> str:
+    """Extract just the non-spoiler '## The Setting' section from DM notes.
+
+    DM notes are assembled as '## The Setting … ## The Plot … ## Main Quest …
+    ## Important NPCs …'. Everything after the setting is spoiler material
+    (villains, secrets, twists) that must NOT reach player-facing text like the
+    archetype cards. If the setting can't be isolated, return "" rather than risk
+    leaking the plot.
+    """
+    if not dm_notes:
+        return ""
+    m = re.search(r"##\s*The Setting\s*(.*?)(?:\n##\s|\Z)", dm_notes, re.S | re.I)
+    return m.group(1).strip() if m else ""
+
+
 async def generate_archetypes(
     scenario_name: str,
     scenario_details: Optional[str] = None,
@@ -651,30 +666,39 @@ async def generate_archetypes(
     )
     agent = _text_agent(GeneratedArchetypeList)
 
+    # Only the non-spoiler SETTING reaches this player-facing generation — never
+    # the plot, quest, villains or secrets from the DM notes.
+    setting = _setting_only(scenario_details)
     context_section = ""
-    if scenario_details:
+    if setting:
         context_section = f"""
-SCENARIO CONTEXT:
-{scenario_details}
+WORLD & SETTING (non-spoiler background — the tone and locale the players begin in):
+{setting}
 
 """
 
     prompt = f"""
 You are designing playable hero archetypes for a D&D-style adventure named '{scenario_name}'.
-{context_section}Generate {num_archetypes} DISTINCT hero archetypes that fit THIS specific scenario's
-setting, tone, and quest. Avoid generic filler — each should feel like it belongs in this world and
-covers a different party role (e.g. front-line fighter, stealth/skill specialist, arcane/support,
-face/social, ranged/scout). Make the set complementary so any pick leads to a fun, viable hero.
+{context_section}Generate {num_archetypes} DISTINCT hero archetypes that fit this world's SETTING and
+TONE. Avoid generic filler — each should feel like it belongs in this world and covers a different
+party role (e.g. front-line fighter, stealth/skill specialist, arcane/support, face/social,
+ranged/scout). Make the set complementary so any pick leads to a fun, viable hero.
+
+CRITICAL — NO SPOILERS: These archetypes are shown to players BEFORE the adventure begins. Describe
+ONLY who the hero is — their fantasy, role, and playstyle — grounded in the world's setting and tone.
+Do NOT reveal or even hint at the plot, the quest's objective, any villain or their name, twists, or
+secrets the players are meant to discover in play. Sell the CHARACTER, never the story.
 
 For each archetype provide:
-- name: An evocative title fitting the scenario (NOT a personal name — a role identity, e.g. 'The Ashen Warden')
+- name: An evocative title (NOT a personal name — a role identity, e.g. 'The Ashen Warden')
 - role: A short party-function label (e.g. 'Front-line bruiser', 'Stealth & sabotage', 'Arcane support')
-- hook: ONE enticing sentence describing the fantasy of playing this archetype in this scenario
+- hook: ONE enticing sentence about the fantasy of PLAYING this archetype — their role and flavor in
+  this world. No plot, no quest objective, no villain names, no secrets.
 - concept: A vivid VISUAL concept for the portrait — costume, armor/clothing, signature equipment,
   silhouette and overall vibe (2-3 sentences). Describe gear and style ONLY. Do NOT describe facial
   features, age, or ethnicity — the player's own face will be used for the portrait.
 
-Make them diverse, scenario-specific, and exciting.
+Make them diverse, world-appropriate, and exciting — WITHOUT spoiling anything.
 """
     result = await retry_on_overload(agent.run, prompt)
     archetypes = result.output.archetypes
@@ -738,10 +762,13 @@ async def _generate_hero_lore(
     agent = _text_agent(GeneratedCharacter)
 
     context_section = ""
-    if scenario_details:
+    # Only the non-spoiler setting reaches hero lore — the backstory is shown to the
+    # player and must not leak the plot/villains/secrets they should discover in play.
+    setting = _setting_only(scenario_details)
+    if setting:
         context_section = f"""
-SCENARIO CONTEXT:
-{scenario_details}
+WORLD & SETTING (non-spoiler background):
+{setting}
 
 """
 
@@ -775,7 +802,9 @@ Create ONE fully-realized hero for a D&D-style adventure named '{scenario_name}'
 Provide:
 {name_rule}
 - strength, intelligence, agility: Stats between 1-20 that reflect this archetype's role
-- backstory: 2-3 sentences of history and motivation that tie the hero into THIS scenario
+- backstory: 2-3 sentences of personal history and motivation grounded in this WORLD. Do NOT
+  reference the adventure's plot, quest objective, villains, twists, or secrets — those are for the
+  player to discover in play
 - personality: 2-3 sentences on their traits, mannerisms, and how they interact with others
 - skills: 3-5 concrete skills matching the archetype and stats
 - inventory: 3-4 starting items. Each item needs a PLAIN, non-cryptic name AND a one-sentence

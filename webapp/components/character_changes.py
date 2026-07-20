@@ -60,7 +60,11 @@ def render_character_changes(scene: Scene):
                         ui.label("🎒").classes("text-lg")
                         ui.label(f"{change.character_name}:").classes("font-bold")
                         ui.label("gained").classes("text-green-400")
-                        ui.label(", ".join(change.items_added)).classes("font-semibold")
+                        ui.label(
+                            ", ".join(
+                                getattr(i, "name", str(i)) for i in change.items_added
+                            )
+                        ).classes("font-semibold")
 
                 if change.items_removed:
                     with ui.row().classes("items-center gap-2 mb-2"):
