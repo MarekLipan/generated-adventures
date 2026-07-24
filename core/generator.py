@@ -322,6 +322,39 @@ def _prioritize_scene_references(
     )
 
 
+def _resolve_image_subject_ids(
+    image_subjects: Optional[List[str]],
+    assets: dict[str, Asset],
+    visible_asset_ids: List[str],
+) -> List[str]:
+    """Resolve the art-directed in-frame subjects to asset ids to reference.
+
+    - image_subjects is None (model didn't art-direct): fall back to all visible
+      assets (previous behavior) so we never accidentally drop the hero.
+    - image_subjects is [] (explicit environment/establishing shot): no references.
+    - otherwise: only the named subjects are referenced (reference isolation),
+      matched tolerantly (party subset-match, NPC/object token-equality).
+    """
+    if image_subjects is None:
+        return visible_asset_ids
+    ids: List[str] = []
+    for name in image_subjects:
+        if not name:
+            continue
+        for aid, asset in assets.items():
+            if aid in ids:
+                continue
+            is_party = aid.startswith("player_")
+            matched = (
+                asset.name.lower() == name.strip().lower()
+                or (_names_match(name, asset.name) if is_party else _npc_names_match(name, asset.name))
+            )
+            if matched:
+                ids.append(aid)
+                break
+    return ids
+
+
 def _generate_scene_image_sync(
     generator: ImageGenerator,
     game_id: str,
@@ -1852,13 +1885,35 @@ CRITICAL RULES FOR GAME STATUS (REQUIRED FIELD):
   * This ends the game immediately with a game over
   * The scene should describe their defeat or death dramatically
   * Still provide a prompt field (required by schema), but it won't be shown to players
-- Set game_status to "completed" ONLY when the main quest objective is definitively achieved:
-  * The primary goal from scenario_details must be fulfilled
-  * This ends the game with a victory screen
-  * The scene should describe their triumph and resolution
-  * Still provide a prompt field (required by schema), but it won't be shown to players
-- Do NOT set completed prematurely - minor victories are still "ongoing"
-- Do NOT set completed just because things are going well - only when main quest is done
+- Set game_status to "completed" ONLY when the main quest objective is definitively achieved AND its
+  immediate consequences have played out — do NOT snap to victory the instant an objective is
+  mechanically touched:
+  * The primary goal from scenario_details must be fulfilled.
+  * If the scenario hinges on a pivotal CHOICE or MORAL DILEMMA (per the DM notes), that decision
+    MUST have been presented to the player and resolved by their action before you complete — never
+    skip it to reach the ending faster.
+  * Play out the fallout of the climactic action first — the cost, the escape, the aftermath. Prefer
+    to keep the objective-reaching scene "ongoing" with one more beat, then complete on the FOLLOWING
+    scene once the consequences and a brief resolution have been shown, so the ending feels earned.
+  * The completing scene should describe both the triumph AND its resolution, not merely state success.
+  * Still provide a prompt field (required by schema), but it won't be shown to players.
+- Do NOT set completed prematurely — a minor victory, or reaching the objective while a dilemma or
+  its consequences remain unplayed, is still "ongoing".
+- Do NOT set completed just because things are going well — only when the main quest is truly resolved.
+
+IMAGE / SHOT DIRECTION (frame each scene like a book illustration):
+- Each scene has ONE illustration. Direct it like an illustrator choosing the single most evocative
+  shot for THIS beat — vary it across scenes: an establishing view of a new location, a lone key
+  NPC or the threat, a significant object/discovery, or a tight action moment. Do NOT cram the whole
+  cast into every image; most beats are stronger with one clear focus.
+- visual_description must describe THAT one shot (its focus, composition, lighting, mood).
+- image_subjects: list the EXACT names (from assets_present or the party roster) of ONLY the
+  figures/objects actually in that shot's frame. Use an EMPTY list for a pure environment shot.
+  Leave out anyone not in this particular image — only these subjects are drawn and referenced.
+  * This keeps images fitting and fresh, AND prevents other figures from copying a referenced
+    character's clothing/look. If the hero is not the focus of this shot, do not put them in frame.
+  * When two characters (e.g. the hero and an enemy) MUST share the frame, describe each one's
+    DISTINCT clothing and silhouette so they don't blend together.
 
 CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
 - Include assets_present array listing ALL important NPCs and objects in the scene
@@ -2009,6 +2064,7 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
       "is_visible": true | false
     }
   ],
+  "image_subjects": ["Exact name of each figure/object actually in THIS image's frame"] (subset of assets_present/party; [] for an environment-only establishing shot),
   "narration_segments": [
     {
       "speaker": "Narrator" | "Exact Character/NPC Name",
@@ -2332,6 +2388,12 @@ Make the scene immersive, clear, and exciting!
         updated_assets = existing_assets
         visible_asset_ids = []
 
+    # Reference only the art-directed in-frame subjects (reference isolation) so the
+    # image fits the beat and other figures don't copy a referenced character's look.
+    image_ref_ids = _resolve_image_subject_ids(
+        generated.image_subjects, updated_assets, visible_asset_ids
+    )
+
     # Generate scene image and voiceover in background threads (concurrently)
     # Now we can include asset images in scene generation (generator acquired above)
     image_task = asyncio.to_thread(
@@ -2345,7 +2407,7 @@ Make the scene immersive, clear, and exciting!
         scenario_name,
         generated.game_status,
         updated_assets,
-        visible_asset_ids,
+        image_ref_ids,
         art_style,
     )
 
@@ -2576,6 +2638,12 @@ Continue the adventure!
         updated_assets = existing_assets
         visible_asset_ids = []
 
+    # Reference only the art-directed in-frame subjects (reference isolation) so the
+    # image fits the beat and other figures don't copy a referenced character's look.
+    image_ref_ids = _resolve_image_subject_ids(
+        generated.image_subjects, updated_assets, visible_asset_ids
+    )
+
     # Generate scene image and voiceover in background threads (concurrently)
     # Now we can include asset images in scene generation (generator acquired above)
     image_task = asyncio.to_thread(
@@ -2589,7 +2657,7 @@ Continue the adventure!
         scenario_name,
         generated.game_status,
         updated_assets,
-        visible_asset_ids,
+        image_ref_ids,
         art_style,
     )
 

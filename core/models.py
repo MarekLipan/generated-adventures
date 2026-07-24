@@ -657,6 +657,15 @@ class GeneratedScene(BaseModel):
         default_factory=list,
         description="List of important NPCs and objects present in this scene. Include any significant characters or items that should have consistent visual representation. MUST reuse existing asset names when referring to already-introduced NPCs/objects.",
     )
+    image_subjects: Optional[List[str]] = Field(
+        None,
+        description="Art direction for the scene ILLUSTRATION: the EXACT names (from assets_present or "
+        "the party) of only the characters/NPCs/objects actually IN this one image's frame — a subset, "
+        "chosen like a book illustrator framing the beat. Use an EMPTY list for a pure environment / "
+        "establishing shot with no figures. Only these subjects are drawn and only their reference "
+        "portraits are used, so leave out anyone not in this particular shot (this also stops other "
+        "figures from copying a referenced character's look). Omit/null only if unsure.",
+    )
     narration_segments: List[NarrationSegment] = Field(
         default_factory=list,
         description="The scene_text broken into ordered voiced-narration segments for a multi-voice audiobook. Descriptive prose -> speaker 'Narrator'; each piece of direct speech -> speaker = the exact name of the character/NPC saying it (dialogue text WITHOUT surrounding quotation marks), with a gender tag. Cover the ENTIRE scene_text in reading order, preserving wording. Do not invent new content.",
