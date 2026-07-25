@@ -183,6 +183,12 @@ class Settings(BaseSettings):
     # pick "any" in the UI for maximal variety on a given generation.
     SCENARIO_DEFAULT_THEME: str = "classic_fantasy"
 
+    # Default stakes/scale for the scenario picker: one of core.generator.SCENARIO_SCALES
+    # ("grounded", "heroic", "epic", "any"). Defaults to grounded/local — aspiring
+    # adventurers on human-sized problems — so not every adventure is world-ending;
+    # pick a bigger scale (or "any") in the UI per generation.
+    SCENARIO_DEFAULT_SCALE: str = "grounded"
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

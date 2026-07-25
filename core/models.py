@@ -143,6 +143,15 @@ class ScenarioTemplate(BaseModel):
         "",
         description="Short genre/tone tag for the scenario (e.g. 'Classic Fantasy', 'Dark Fantasy')",
     )
+    scale: str = Field(
+        "",
+        description="Stakes/scale key: 'grounded', 'heroic', 'epic', or '' (unspecified).",
+    )
+    character_names: List[str] = Field(
+        default_factory=list,
+        description="Named characters/NPCs/places this scenario uses, tracked so other scenarios "
+        "don't reuse the same names.",
+    )
     one_liner: str = Field(
         ...,
         description="Short enticing description (1-2 sentences) to attract players without spoilers",
@@ -376,6 +385,12 @@ class GeneratedScenarioTemplate(BaseModel):
     important_npcs: str = Field(
         ...,
         description="Key NPCs with short descriptions and relevance (2-4 paragraphs)",
+    )
+    character_names: List[str] = Field(
+        default_factory=list,
+        description="The full names of every named CHARACTER/NPC and notable PLACE you introduced in "
+        "this scenario (setting, plot, quest, and NPCs). Used to stop names recurring across "
+        "different scenarios so future adventures can avoid reusing them.",
     )
 
 

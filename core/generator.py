@@ -680,6 +680,7 @@ async def generate_archetypes(
     scenario_name: str,
     scenario_details: Optional[str] = None,
     num_archetypes: int = 5,
+    scale: str = "any",
 ) -> List[GeneratedArchetype]:
     """Generate scenario-tailored hero archetypes for players to choose from.
 
@@ -690,12 +691,14 @@ async def generate_archetypes(
         scenario_name: Name of the chosen scenario
         scenario_details: Markdown DM notes (setting/plot/quest/NPCs) for context
         num_archetypes: How many distinct archetypes to offer
+        scale: Stakes/scale key from SCENARIO_SCALES — sets how legendary vs green
+               the heroes should feel (aspiring locals vs world-saving legends).
 
     Returns:
         List of GeneratedArchetype options.
     """
     logger.info(
-        f"Generating {num_archetypes} archetypes for scenario: {scenario_name}"
+        f"Generating {num_archetypes} archetypes for scenario: {scenario_name} (scale={scale})"
     )
     agent = _text_agent(GeneratedArchetypeList)
 
@@ -710,9 +713,22 @@ WORLD & SETTING (non-spoiler background — the tone and locale the players begi
 
 """
 
+    scale_key = scale if scale in SCENARIO_SCALES else "any"
+    _scale_label, scale_steering = SCENARIO_SCALES[scale_key]
+    stature = {
+        "grounded": "These are ASPIRING, GREEN adventurers — local, humble, still proving "
+        "themselves. NOT legendary, NOT chosen ones. Give modest, believable competence and "
+        "everyday gear, not artifact-tier power.",
+        "heroic": "These are CAPABLE, SEASONED adventurers — competent professionals, but not "
+        "legendary. Solid skills and gear, no world-tier power.",
+        "epic": "These are LEGENDARY, powerful heroes fit for world-shaking deeds — renowned, "
+        "battle-hardened, carrying signature might.",
+    }.get(scale_key, "")
+    scale_section = f"\nHERO STATURE — match this level:\n{stature}\n" if stature else ""
+
     prompt = f"""
 You are designing playable hero archetypes for a D&D-style adventure named '{scenario_name}'.
-{context_section}Generate {num_archetypes} DISTINCT hero archetypes that fit this world's SETTING and
+{context_section}{scale_section}Generate {num_archetypes} DISTINCT hero archetypes that fit this world's SETTING and
 TONE. Avoid generic filler — each should feel like it belongs in this world and covers a different
 party role (e.g. front-line fighter, stealth/skill specialist, arcane/support, face/social,
 ranged/scout). Make the set complementary so any pick leads to a fun, viable hero.
@@ -790,6 +806,7 @@ async def _generate_hero_lore(
     has_photo: bool,
     custom_name: Optional[str] = None,
     gender: str = "unspecified",
+    avoid_names: Optional[List[str]] = None,
 ) -> GeneratedCharacter:
     """Generate stats + lore for a single hero fitted to scenario and archetype."""
     agent = _text_agent(GeneratedCharacter)
@@ -805,11 +822,17 @@ WORLD & SETTING (non-spoiler background):
 
 """
 
-    name_rule = (
-        f"- name: Use EXACTLY this name for the hero: '{custom_name}'"
-        if custom_name
-        else "- name: Invent a fitting full name (with an optional title/nickname)"
-    )
+    if custom_name:
+        name_rule = f"- name: Use EXACTLY this name for the hero: '{custom_name}'"
+    else:
+        avoid = _avoid_names_section(
+            avoid_names,
+            "Do NOT reuse any of these names already used in other adventures (pick something clearly different):",
+        ).strip()
+        name_rule = (
+            "- name: Invent a fitting, distinctive full name (with an optional title/nickname). "
+            + (avoid if avoid else "Avoid generic, overused fantasy names.")
+        )
     appearance_rule = (
         "- appearance: Describe their COSTUME, equipment, and bearing to match the archetype concept. "
         + (
@@ -862,6 +885,7 @@ async def generate_hero(
     photo_path: Optional[pathlib.Path] = None,
     custom_name: Optional[str] = None,
     gender: str = "unspecified",
+    avoid_names: Optional[List[str]] = None,
 ) -> Character:
     """Generate a single hero (lore + portrait) from a chosen archetype.
 
@@ -896,7 +920,7 @@ async def generate_hero(
 
     # Kick off lore + portrait concurrently.
     lore_task = _generate_hero_lore(
-        scenario_name, scenario_details, archetype, has_photo, custom_name, gender
+        scenario_name, scenario_details, archetype, has_photo, custom_name, gender, avoid_names
     )
     portrait_task = asyncio.to_thread(
         _generate_hero_portrait_sync,
@@ -980,14 +1004,60 @@ SCENARIO_THEMES: dict[str, tuple[str, str]] = {
 }
 
 
+#: Stakes/scale steering for scenarios. Key -> (UI label, prompt steering). Shapes
+#: BOTH the scenario's scope/stakes and the hero archetypes offered (aspiring vs
+#: legendary). "any" leaves scale unconstrained.
+SCENARIO_SCALES: dict[str, tuple[str, str]] = {
+    "grounded": (
+        "Local & Grounded",
+        "Keep the STAKES LOW and LOCAL. These are aspiring, everyday adventurers tackling a small, "
+        "personal problem close to home — a haunted mill, a missing caravan, bandits on the road, a "
+        "village feud, a beast troubling the farms. NO chosen ones, NO ancient prophecies, NO "
+        "world-ending threats, NO legendary heroes. The heroes are capable but green; the danger is "
+        "human-sized, believable, and personal.",
+    ),
+    "heroic": (
+        "Heroic & Regional",
+        "Pitch this at a MID scale. Seasoned but not legendary adventurers face a threat to a town or "
+        "region — a cult, a warlord, a spreading blight, a corrupt lord. Real danger and rising "
+        "stakes, but NOT apocalyptic and NOT 'only you can save everyone'.",
+    ),
+    "epic": (
+        "Epic & World-Shaping",
+        "Pitch this EPIC. Legendary heroes against a world-shaping threat — an awakening god, a "
+        "realm-ending cataclysm, a conquering dark power. Grand, high-stakes, save-the-world scope.",
+    ),
+    "any": (
+        "Surprise Me (any scale)",
+        "",
+    ),
+}
+
+
+def scenario_scale_options() -> dict[str, str]:
+    """{key: label} for the scenario stakes/scale picker."""
+    return {key: label for key, (label, _steer) in SCENARIO_SCALES.items()}
+
+
 def scenario_theme_options() -> dict[str, str]:
     """{key: label} for the scenario genre picker."""
     return {key: label for key, (label, _steer) in SCENARIO_THEMES.items()}
 
 
+def _avoid_names_section(avoid_names: Optional[List[str]], header: str) -> str:
+    """Format an 'already-used names, do not reuse' instruction, or '' if none."""
+    names = sorted({n.strip() for n in (avoid_names or []) if n and n.strip()})
+    if not names:
+        return ""
+    shown = ", ".join(names[:60])
+    return f"{header} {shown}.\n"
+
+
 async def generate_scenario_template(
     existing_scenarios: List[ScenarioTemplate],
     theme: str = "any",
+    scale: str = "any",
+    avoid_names: Optional[List[str]] = None,
 ) -> ScenarioTemplate:
     """Generates a complete new scenario template with contrastive prompting.
 
@@ -996,6 +1066,8 @@ async def generate_scenario_template(
                           to ensure the new scenario is distinct and original
         theme: Genre steering key from SCENARIO_THEMES. When a specific genre is chosen,
                novelty is sought WITHIN that genre rather than by switching setting/era.
+        scale: Stakes/scale steering key from SCENARIO_SCALES (local/heroic/epic), shaping
+               how big the threat and scope are.
 
     Returns:
         ScenarioTemplate object with name, one_liner, and full DM notes
@@ -1006,13 +1078,24 @@ async def generate_scenario_template(
     _label, theme_steering = SCENARIO_THEMES[theme_key]
     themed = bool(theme_steering)
 
+    scale_key = scale if scale in SCENARIO_SCALES else "any"
+    _scale_label, scale_steering = SCENARIO_SCALES[scale_key]
+
     logger.info(
-        f"Generating new scenario template (theme={theme_key}, contrasting with "
-        f"{len(existing_scenarios)} existing scenarios)..."
+        f"Generating new scenario template (theme={theme_key}, scale={scale_key}, "
+        f"contrasting with {len(existing_scenarios)} existing scenarios)..."
     )
 
     theme_section = (
         f"\nGENRE / THEME — follow this closely:\n{theme_steering}\n" if themed else ""
+    )
+    scale_section = (
+        f"\nSTAKES / SCALE — follow this closely:\n{scale_steering}\n" if scale_steering else ""
+    )
+    avoid_section = _avoid_names_section(
+        avoid_names,
+        "- These character and place names are ALREADY USED by other adventures — do NOT "
+        "reuse any of them or close variants:",
     )
 
     # Build contrastive prompt with existing scenarios
@@ -1064,6 +1147,7 @@ Analyze the patterns in existing scenarios and deliberately create something nov
     prompt = f"""
 You are a creative fantasy adventure designer creating scenarios for a D&D-style tabletop RPG.
 {theme_section}
+{scale_section}
 {contrastive_context}
 
 Generate a COMPLETE scenario with the following components:
@@ -1105,6 +1189,12 @@ Generate a COMPLETE scenario with the following components:
    - Include allies, neutrals, and antagonists
    - Make them memorable and useful for roleplay
 
+NAME & PLACE VARIETY (do not reuse names across adventures):
+- Invent FRESH character and place names, and list every named character/place you use in the
+  character_names field so future adventures can avoid repeating them.
+{avoid_section}- Draw on genuinely varied naming traditions and sound-shapes; avoid generic, repetitive fantasy
+  names so different adventures don't feel same-y.
+
 Create a scenario that is fresh, engaging, and distinctly different from existing ones.
 Make it playable, fun, and full of opportunities for player choice and creativity.
 """
@@ -1133,11 +1223,15 @@ Make it playable, fun, and full of opportunities for player choice and creativit
     scenario_template = ScenarioTemplate(
         name=generated.name,
         genre=genre,
+        scale=scale_key,
         one_liner=generated.one_liner,
         dm_notes=dm_notes,
+        character_names=list(getattr(generated, "character_names", []) or []),
     )
 
-    logger.info(f"Genre: {genre}")
+    logger.info(
+        f"Genre: {genre} | Scale: {scale_key} | names: {len(scenario_template.character_names)}"
+    )
     return scenario_template
 
 
@@ -1927,6 +2021,9 @@ CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
   * Use ONE stable canonical name for each character for the whole adventure: no
     leading "The", no honorifics added or dropped between scenes, identical spelling
     and hyphenation every time (e.g. always "Echo-Child", never also "The Echo Child").
+  * When you introduce a BRAND-NEW NPC, invent a fresh name — avoid the overused clichés
+    (Elara, Kael/Kaelen, Lyra, Seraphina, Thorne, ...) and never reuse a name already used
+    by a party member or an existing asset in this game.
 - CRITICAL: PARTY MEMBERS ARE ASSETS TOO:
   * ALL party member characters are pre-registered as assets (type: "npc")
   * When party members appear in a scene, ALWAYS include them in assets_present
@@ -2311,20 +2408,22 @@ PARTY CHARACTER SHEETS:
 Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
 
 CRITICAL FOR OPENING SCENE:
-1. **Establish how the party came together**: Briefly narrate how these characters met and why they're working together
-   - Use their backstories to create natural connections (shared goals, chance meeting, hired together, etc.)
-   - Make it believable based on their personalities and backgrounds
-   - Keep this part concise (2-3 sentences)
+1. **Ground how the party arrived HERE**: Before anything happens, establish how these characters
+   came to be at this exact place — their journey in, why they're passing through, or the ordinary
+   moment they are in as the scene opens. Use their backstories for natural connections (travelling
+   together, hired on, drawn by rumor, chance). 2-4 sentences of grounded on-ramp so the start feels
+   lived-in and earned, not dropped in cold.
 
-2. **Explain the current situation**: Describe what brings them to this specific moment
-   - Where are they? (refer to the setting from scenario details)
-   - Why are they here? (connect to the main quest)
-   - What immediate situation do they find themselves in?
+2. **Ease into the situation — do NOT cold-open with a quest-giver**: Avoid starting with an elder,
+   mayor, or official who immediately tells the party to go somewhere and do something — that feels
+   forced. Let the place and a natural moment draw them in first: something they notice, overhear,
+   stumble into, or are asked in passing. The hook should emerge from lived experience, not an
+   exposition dump.
 
-3. **Introduce the main quest naturally**: Players don't know the scenario details, so reveal the quest/goal through the narrative
-   - Don't assume players know anything from the DM notes
-   - Make the objective clear through dialogue, events, or circumstances
-   - Give them a reason to care and a clear direction
+3. **Introduce the goal naturally and at the right pace**: Players don't know the scenario details,
+   so reveal the objective gradually through what they see and do — not a briefing. Give a reason to
+   care and a direction, but a smaller, closer hook first is good; let any larger stakes surface over
+   time rather than all at once.
 
 4. **Set the scene and mood**: Create atmosphere with vivid descriptions
    - Describe the environment, sounds, smells, lighting

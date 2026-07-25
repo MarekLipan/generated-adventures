@@ -114,9 +114,12 @@ async def _on_style_chosen(
     try:
         scenario = game_flow.get_scenario_for_game(game_id)
         scenario_details = scenario.dm_notes if scenario else None
+        # Match hero stature to the scenario's stakes (aspiring locals vs legends).
+        scenario_scale = getattr(scenario, "scale", "") or "any"
         archetypes = await game_flow.generate_archetypes(
             scenario_name=scenario_name,
             scenario_details=scenario_details,
+            scale=scenario_scale,
         )
     except Exception as e:
         logger.error(f"Error generating archetypes: {e}", exc_info=True)

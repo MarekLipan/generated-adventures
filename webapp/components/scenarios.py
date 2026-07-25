@@ -47,16 +47,30 @@ async def show_scenarios(main_container, game_id: str):
                         if settings.SCENARIO_DEFAULT_THEME in theme_options
                         else "any"
                     )
+                    scale_options = game_flow.scenario_scale_options()
+                    default_scale = (
+                        settings.SCENARIO_DEFAULT_SCALE
+                        if settings.SCENARIO_DEFAULT_SCALE in scale_options
+                        else "any"
+                    )
                     genre_select = (
                         ui.select(theme_options, value=default_theme, label="Genre")
                         .props("outlined dense options-dense")
-                        .classes("w-52")
+                        .classes("w-48")
+                    )
+                    scale_select = (
+                        ui.select(scale_options, value=default_scale, label="Stakes")
+                        .props("outlined dense options-dense")
+                        .classes("w-48")
                     )
                     ui.button(
                         "✨ Generate New Scenario",
                         on_click=lambda: asyncio.create_task(
                             generate_and_add_new_scenario(
-                                main_container, game_id, genre_select.value
+                                main_container,
+                                game_id,
+                                genre_select.value,
+                                scale_select.value,
                             )
                         ),
                     ).classes("fantasy-accent-gold")
@@ -78,6 +92,11 @@ async def show_scenarios(main_container, game_id: str):
                                 genre = getattr(scenario, "genre", "") or ""
                                 if genre:
                                     ui.label(genre).classes("genre-badge")
+                                scale_key = getattr(scenario, "scale", "") or ""
+                                if scale_key and scale_key != "any":
+                                    ui.label(
+                                        scale_options.get(scale_key, scale_key)
+                                    ).classes("scale-badge")
                             ui.label(scenario.one_liner).classes("text-base mb-3")
 
                             with ui.row().classes("items-center gap-4"):
@@ -97,9 +116,9 @@ async def show_scenarios(main_container, game_id: str):
 
 
 async def generate_and_add_new_scenario(
-    main_container, game_id: str, theme: str = "any"
+    main_container, game_id: str, theme: str = "any", scale: str = "any"
 ):
-    """Generate a new scenario (optionally steered to a genre) and add it to the pool."""
+    """Generate a new scenario (steered to a genre + stakes/scale) and add it to the pool."""
     show_loading(
         main_container,
         "✨ Generating New Scenario...",
@@ -107,8 +126,10 @@ async def generate_and_add_new_scenario(
     )
 
     try:
-        new_scenario = await game_flow.generate_new_scenario(theme=theme)
-        logger.info(f"New scenario generated ({theme}): {new_scenario.name}")
+        new_scenario = await game_flow.generate_new_scenario(theme=theme, scale=scale)
+        logger.info(
+            f"New scenario generated (theme={theme}, scale={scale}): {new_scenario.name}"
+        )
 
         # Refresh the scenario list (which will show the new scenario)
         await show_scenarios(main_container, game_id)
@@ -121,7 +142,7 @@ async def generate_and_add_new_scenario(
             title="Error Generating Scenario",
             message="The Dungeon Master encountered an issue while creating a new adventure.",
             retry_callback=lambda: asyncio.create_task(
-                generate_and_add_new_scenario(main_container, game_id, theme)
+                generate_and_add_new_scenario(main_container, game_id, theme, scale)
             ),
         )
 

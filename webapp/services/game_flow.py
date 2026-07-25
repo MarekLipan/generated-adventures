@@ -36,8 +36,15 @@ def scenario_theme_options() -> dict[str, str]:
     return generator.scenario_theme_options()
 
 
-async def generate_new_scenario(theme: str = "any") -> ScenarioTemplate:  # type: ignore
-    """Generate a new scenario template, optionally steered to a genre/theme.
+def scenario_scale_options() -> dict[str, str]:
+    """{key: label} stakes/scale choices for the scenario picker."""
+    return generator.scenario_scale_options()
+
+
+async def generate_new_scenario(
+    theme: str = "any", scale: str = "any"
+) -> ScenarioTemplate:  # type: ignore
+    """Generate a new scenario template, optionally steered to a genre and scale.
 
     Returns the newly created ScenarioTemplate.
     """
@@ -46,7 +53,7 @@ async def generate_new_scenario(theme: str = "any") -> ScenarioTemplate:  # type
 
     # Generate new scenario
     new_scenario = await generator.generate_scenario_template(
-        existing_scenarios, theme=theme
+        existing_scenarios, theme=theme, scale=scale, avoid_names=_used_names()
     )
 
     # Save it
@@ -109,16 +116,43 @@ def add_character(game_id: str, character: Character) -> None:
 # --- Archetypes & photo-based heroes ----------------------------------------------
 
 
+def _used_names() -> list[str]:
+    """Names already used by saved scenarios and games (characters, NPCs, places),
+    so new generations can avoid repeating them across adventures. Best-effort."""
+    names: set[str] = set()
+    try:
+        for tpl in persistence.load_all_scenario_templates():
+            names.update(getattr(tpl, "character_names", []) or [])
+    except Exception:  # noqa: BLE001 - name de-dup is best-effort, never fatal
+        pass
+    try:
+        for gid, _name, _summary in persistence.list_saved_games():
+            g = persistence.load_game(gid)
+            if not g:
+                continue
+            names.update(c.name for c in g.characters if c.name)
+            names.update(
+                a.name
+                for a in g.assets.values()
+                if getattr(a, "type", None) == "npc" and a.name
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return sorted(n for n in names if n and n.strip())
+
+
 async def generate_archetypes(
     scenario_name: str,
     scenario_details: str | None = None,
     num_archetypes: int = 5,
+    scale: str = "any",
 ) -> List[GeneratedArchetype]:  # type: ignore
     """Generate scenario-tailored hero archetypes for players to pick from."""
     return await generator.generate_archetypes(
         scenario_name=scenario_name,
         scenario_details=scenario_details,
         num_archetypes=num_archetypes,
+        scale=scale,
     )
 
 
@@ -160,6 +194,7 @@ async def generate_hero(
         photo_path=photo_path,
         custom_name=custom_name,
         gender=gender,
+        avoid_names=_used_names(),
     )
 
 
