@@ -323,6 +323,7 @@ async def _do_generate_hero(
             photo_path=photo_path,
             custom_name=custom_name,
             gender=gender_holder.get("value", "unspecified"),
+            scale=getattr(scenario, "scale", "") or "any",
         )
     except Exception as e:
         logger.error(f"Error generating hero: {e}", exc_info=True)

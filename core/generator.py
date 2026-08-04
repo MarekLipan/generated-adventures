@@ -278,7 +278,7 @@ def _prioritize_scene_references(
     assets: dict[str, Asset],
     visible_asset_ids: List[str],
     max_refs: int,
-) -> tuple[List[pathlib.Path], list, list]:
+) -> tuple[List[pathlib.Path], list, list, List[str]]:
     """Choose which visible assets become scene image references, best-first, capped.
 
     Klein downsizes ALL references together to fit VRAM, so a crowded reference
@@ -287,7 +287,9 @@ def _prioritize_scene_references(
     characters that must stay recognizable each get a higher resolution and
     objects/extras are dropped rather than dragging everyone down.
 
-    Returns (reference_files, kept_assets, dropped_assets).
+    Returns (reference_files, kept_assets, dropped_assets, kept_asset_ids) — the
+    files, assets and ids are parallel, so per-subject art direction can be aligned
+    to exactly the references that survived the cap.
     """
 
     def priority(aid: str) -> int:
@@ -309,25 +311,30 @@ def _prioritize_scene_references(
         if not ref_file.exists():
             logger.warning(f"Reference image not found, skipping: {ref_file}")
             continue
-        candidates.append((priority(aid), asset, ref_file))
+        candidates.append((priority(aid), aid, asset, ref_file))
 
     # Stable sort keeps the scene's original ordering within each priority band.
     candidates.sort(key=lambda t: t[0])
     kept = candidates[: max(0, max_refs)]
     dropped = candidates[max(0, max_refs) :]
     return (
-        [ref_file for _, _, ref_file in kept],
-        [asset for _, asset, _ in kept],
-        [asset for _, asset, _ in dropped],
+        [ref_file for _, _, _, ref_file in kept],
+        [asset for _, _, asset, _ in kept],
+        [asset for _, _, asset, _ in dropped],
+        [aid for _, aid, _, _ in kept],
     )
 
 
 def _resolve_image_subject_ids(
-    image_subjects: Optional[List[str]],
+    image_subjects: Optional[list],
     assets: dict[str, Asset],
     visible_asset_ids: List[str],
-) -> List[str]:
-    """Resolve the art-directed in-frame subjects to asset ids to reference.
+) -> tuple[List[str], dict[str, str]]:
+    """Resolve art-directed in-frame subjects to (asset ids, {asset_id: direction}).
+
+    The direction map lets the renderer bind each reference portrait to what that
+    character is doing in frame (which is what stops two characters being swapped),
+    and survives the later reference-cap/prioritization step by being keyed on id.
 
     - image_subjects is None (model didn't art-direct): fall back to all visible
       assets (previous behavior) so we never accidentally drop the hero.
@@ -336,9 +343,12 @@ def _resolve_image_subject_ids(
       matched tolerantly (party subset-match, NPC/object token-equality).
     """
     if image_subjects is None:
-        return visible_asset_ids
+        return visible_asset_ids, {}
     ids: List[str] = []
-    for name in image_subjects:
+    directions: dict[str, str] = {}
+    for subject in image_subjects:
+        name = (getattr(subject, "name", None) or str(subject)).strip()
+        action = (getattr(subject, "action", "") or "").strip()
         if not name:
             continue
         for aid, asset in assets.items():
@@ -346,13 +356,14 @@ def _resolve_image_subject_ids(
                 continue
             is_party = aid.startswith("player_")
             matched = (
-                asset.name.lower() == name.strip().lower()
+                asset.name.lower() == name.lower()
                 or (_names_match(name, asset.name) if is_party else _npc_names_match(name, asset.name))
             )
             if matched:
                 ids.append(aid)
+                directions[aid] = f"{asset.name}, {action}" if action else asset.name
                 break
-    return ids
+    return ids, directions
 
 
 def _generate_scene_image_sync(
@@ -367,6 +378,7 @@ def _generate_scene_image_sync(
     assets: dict[str, Asset] = None,
     visible_asset_ids: List[str] = None,
     art_style: Optional[str] = None,
+    subject_directions: Optional[List[str]] = None,
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
 
@@ -406,8 +418,9 @@ def _generate_scene_image_sync(
     # capped so each surviving reference renders at a higher resolution (Klein
     # scales all references down together to fit VRAM).
     reference_images: List[pathlib.Path] = []
+    aligned_directions: List[str] = []
     if assets and visible_asset_ids:
-        reference_images, kept, dropped = _prioritize_scene_references(
+        reference_images, kept, dropped, kept_ids = _prioritize_scene_references(
             assets, visible_asset_ids, settings.IMAGE_MAX_SCENE_REFERENCES
         )
         for a in kept:
@@ -417,6 +430,15 @@ def _generate_scene_image_sync(
                 f"↓ Dropped {len(dropped)} lower-priority reference(s) to keep "
                 f"resolution high: {', '.join(a.name for a in dropped)}"
             )
+        # Align each surviving reference with its art direction (who is doing what),
+        # in the SAME order the renderer will lay out and repaint them. Keeping these
+        # parallel is what stops one character being painted into another's pose.
+        if subject_directions:
+            aligned_directions = [
+                subject_directions.get(aid, "") for aid in kept_ids
+            ]
+            if not any(aligned_directions):
+                aligned_directions = []
 
     logger.info(
         f"Generating scene image for scene {scene_id} with {len(reference_images)} reference images"
@@ -432,6 +454,7 @@ def _generate_scene_image_sync(
         output_path=output_path,
         reference_images=reference_images if reference_images else None,
         art_style=art_style,
+        subject_directions=aligned_directions or None,
     )
 
     return image_file_path
@@ -716,15 +739,32 @@ WORLD & SETTING (non-spoiler background — the tone and locale the players begi
     scale_key = scale if scale in SCENARIO_SCALES else "any"
     _scale_label, scale_steering = SCENARIO_SCALES[scale_key]
     stature = {
-        "grounded": "These are ASPIRING, GREEN adventurers — local, humble, still proving "
-        "themselves. NOT legendary, NOT chosen ones. Give modest, believable competence and "
-        "everyday gear, not artifact-tier power.",
-        "heroic": "These are CAPABLE, SEASONED adventurers — competent professionals, but not "
-        "legendary. Solid skills and gear, no world-tier power.",
-        "epic": "These are LEGENDARY, powerful heroes fit for world-shaking deeds — renowned, "
-        "battle-hardened, carrying signature might.",
+        "grounded": (
+            "LEVEL-1 NOVICES. These are ordinary locals taking their FIRST steps as adventurers — "
+            "a farmhand, a poacher, an apprentice, a militia recruit, a road-worn pedlar. They have "
+            "no renown, no titles, no mastery.\n"
+            "  * Titles/roles must sound humble and ordinary (e.g. 'The Poacher', 'The Apprentice', "
+            "'The Cooper's Daughter') — NOT grand epithets like 'Warden', 'Master', 'Champion', "
+            "'Blademaster', 'Arcanist' or 'of the ...' honorifics.\n"
+            "  * GEAR IS POOR AND PRACTICAL: patched wool, homespun linen, worn leather, a hooded "
+            "cloak, hobnail boots, a rope belt. Weapons are simple and often improvised or "
+            "second-hand — a hunting bow, a woodsman's axe, a sling, a cheap short sword, a staff.\n"
+            "  * FORBIDDEN in the visual concept: plate/scale/ornate armor, gilding, filigree, "
+            "silks, jewels, runes, glowing/enchanted items, flowing masterwork cloaks, heraldry, "
+            "trophies, or anything that reads as expensive, magical or 'master-tier'.\n"
+            "  * They should look like they scraped their kit together, not like seasoned heroes."
+        ),
+        "heroic": (
+            "CAPABLE, SEASONED adventurers — competent professionals, but not legendary. "
+            "Well-used, functional kit: sturdy leather or mail, a decent weapon, practical gear. "
+            "No artifact-tier or ostentatious equipment."
+        ),
+        "epic": (
+            "LEGENDARY, powerful heroes fit for world-shaking deeds — renowned, battle-hardened, "
+            "carrying signature, storied equipment."
+        ),
     }.get(scale_key, "")
-    scale_section = f"\nHERO STATURE — match this level:\n{stature}\n" if stature else ""
+    scale_section = f"\nHERO STATURE — match this level EXACTLY:\n{stature}\n" if stature else ""
 
     prompt = f"""
 You are designing playable hero archetypes for a D&D-style adventure named '{scenario_name}'.
@@ -746,6 +786,8 @@ For each archetype provide:
 - concept: A vivid VISUAL concept for the portrait — costume, armor/clothing, signature equipment,
   silhouette and overall vibe (2-3 sentences). Describe gear and style ONLY. Do NOT describe facial
   features, age, or ethnicity — the player's own face will be used for the portrait.
+  * The concept MUST obey the HERO STATURE above — its clothing and equipment have to look like
+    that tier. Do not dress a novice in impressive or ornate gear.
 
 Make them diverse, world-appropriate, and exciting — WITHOUT spoiling anything.
 """
@@ -756,18 +798,48 @@ Make them diverse, world-appropriate, and exciting — WITHOUT spoiling anything
     return archetypes
 
 
+#: Visual gear-tier cue appended to hero portrait prompts, so a "level 1" hero
+#: doesn't get rendered in ornate master-tier armor.
+#: The hero portrait is the reference every later scene is built from, so the face
+#: and hair must be fully visible here — a hood/helm/mask hides the very features
+#: that keep the character recognizable, leaving scene renders free to reinvent the
+#: head. Characters can still wear hoods in scenes; just not in this reference.
+_PORTRAIT_HEAD_RULE = (
+    "Head UNCOVERED with the face fully visible: no hood, cowl, helmet, mask, veil "
+    "or wide-brimmed hat over the head or shading the face. Hair clearly visible. "
+    "Face evenly lit and turned toward the viewer."
+)
+
+_PORTRAIT_TIER_CUE = {
+    "grounded": (
+        " Novice adventurer just starting out: poor, practical, second-hand kit — patched wool and "
+        "homespun cloth, worn leather, a plain travel cloak worn back off the head, simple "
+        "hand-me-down weapon. No ornate or plate armor, no gilding, jewels, runes, silks or "
+        "glowing magic items."
+    ),
+    "heroic": (
+        " Seasoned adventurer: sturdy, well-used practical gear; nothing ornate or artifact-like."
+    ),
+    "epic": " Legendary hero: storied, signature equipment befitting great renown.",
+}
+
+
 def _build_hero_portrait_prompt(
-    hero_name: str, archetype: GeneratedArchetype, has_photo: bool
+    hero_name: str,
+    archetype: GeneratedArchetype,
+    has_photo: bool,
+    scale: str = "any",
 ) -> str:
     """Build the portrait prompt for a hero, with or without a player photo."""
+    tier = _PORTRAIT_TIER_CUE.get(scale, "")
     if has_photo:
         return (
             f"Reimagine the person in the reference photograph as {hero_name}, "
-            f"{archetype.concept} "
+            f"{archetype.concept}{tier} "
             "Keep their facial features, face shape, skin tone and hairstyle clearly "
-            "recognizable so the hero looks like the same person."
+            f"recognizable so the hero looks like the same person. {_PORTRAIT_HEAD_RULE}"
         )
-    return f"{hero_name}. {archetype.concept}"
+    return f"{hero_name}. {archetype.concept}{tier} {_PORTRAIT_HEAD_RULE}"
 
 
 def _generate_hero_portrait_sync(
@@ -778,10 +850,11 @@ def _generate_hero_portrait_sync(
     photo_path: Optional[pathlib.Path],
     game_dir: pathlib.Path,
     idx: int,
+    scale: str = "any",
 ) -> pathlib.Path | None:
     """Synchronous helper: render one hero portrait (optionally from a photo)."""
     has_photo = bool(photo_path and pathlib.Path(photo_path).exists())
-    prompt_img = _build_hero_portrait_prompt(hero_name, archetype, has_photo)
+    prompt_img = _build_hero_portrait_prompt(hero_name, archetype, has_photo, scale)
 
     safe_name = (
         "".join(c for c in hero_name if c.isalnum() or c in " _-")
@@ -807,6 +880,7 @@ async def _generate_hero_lore(
     custom_name: Optional[str] = None,
     gender: str = "unspecified",
     avoid_names: Optional[List[str]] = None,
+    scale: str = "any",
 ) -> GeneratedCharacter:
     """Generate stats + lore for a single hero fitted to scenario and archetype."""
     agent = _text_agent(GeneratedCharacter)
@@ -847,6 +921,30 @@ WORLD & SETTING (non-spoiler background):
         if gender and gender != "unspecified"
         else ""
     )
+    tier_section = {
+        "grounded": (
+            "\nPOWER TIER — LEVEL 1 NOVICE (obey strictly):\n"
+            "This hero is just STARTING OUT: an ordinary local, no renown, no mastery, no titles.\n"
+            "- Stats: keep them modest and human — roughly 8-13, with ONE modest strength up to 14. "
+            "No 16+ anywhere.\n"
+            "- Skills: humble, practical, everyday competences (mending, foraging, haggling, "
+            "a bit of hunting) — NOT mastery, NOT rare arcane arts.\n"
+            "- Inventory: cheap, worn, scavenged everyday kit. NO enchanted, glowing, runed, "
+            "masterwork, gilded or heirloom-artifact items.\n"
+            "- Appearance: patched, homespun, weather-worn clothing and second-hand gear. "
+            "NO ornate armor, silks, jewels, filigree, heraldry or anything expensive-looking.\n"
+            "- Backstory: small, local and personal (a village, a trade, a debt, a lost sibling) — "
+            "no prophecies, chosen-one destinies, famous deeds or legendary bloodlines.\n"
+        ),
+        "heroic": (
+            "\nPOWER TIER — SEASONED (not legendary):\n"
+            "- Stats mostly 10-15. Competent, well-used gear; nothing artifact-tier or ostentatious.\n"
+        ),
+        "epic": (
+            "\nPOWER TIER — LEGENDARY:\n"
+            "- Stats may reach 16-18. Storied, signature equipment and renowned deeds fit here.\n"
+        ),
+    }.get(scale if scale in SCENARIO_SCALES else "any", "")
 
     prompt = f"""
 Create ONE fully-realized hero for a D&D-style adventure named '{scenario_name}'.
@@ -854,10 +952,11 @@ Create ONE fully-realized hero for a D&D-style adventure named '{scenario_name}'
 - Archetype: {archetype.name} ({archetype.role})
 - Fantasy: {archetype.hook}
 - Visual concept: {archetype.concept}
-{gender_line}
+{gender_line}{tier_section}
 Provide:
 {name_rule}
 - strength, intelligence, agility: Stats between 1-20 that reflect this archetype's role
+  (respecting the POWER TIER above)
 - backstory: 2-3 sentences of personal history and motivation grounded in this WORLD. Do NOT
   reference the adventure's plot, quest objective, villains, twists, or secrets — those are for the
   player to discover in play
@@ -886,6 +985,7 @@ async def generate_hero(
     custom_name: Optional[str] = None,
     gender: str = "unspecified",
     avoid_names: Optional[List[str]] = None,
+    scale: str = "any",
 ) -> Character:
     """Generate a single hero (lore + portrait) from a chosen archetype.
 
@@ -920,7 +1020,14 @@ async def generate_hero(
 
     # Kick off lore + portrait concurrently.
     lore_task = _generate_hero_lore(
-        scenario_name, scenario_details, archetype, has_photo, custom_name, gender, avoid_names
+        scenario_name,
+        scenario_details,
+        archetype,
+        has_photo,
+        custom_name,
+        gender,
+        avoid_names,
+        scale,
     )
     portrait_task = asyncio.to_thread(
         _generate_hero_portrait_sync,
@@ -931,6 +1038,7 @@ async def generate_hero(
         pathlib.Path(photo_path) if has_photo else None,
         game_dir,
         player_index,
+        scale,
     )
 
     lore, image_file_path = await asyncio.gather(
@@ -1010,11 +1118,16 @@ SCENARIO_THEMES: dict[str, tuple[str, str]] = {
 SCENARIO_SCALES: dict[str, tuple[str, str]] = {
     "grounded": (
         "Local & Grounded",
-        "Keep the STAKES LOW and LOCAL. These are aspiring, everyday adventurers tackling a small, "
-        "personal problem close to home — a haunted mill, a missing caravan, bandits on the road, a "
-        "village feud, a beast troubling the farms. NO chosen ones, NO ancient prophecies, NO "
-        "world-ending threats, NO legendary heroes. The heroes are capable but green; the danger is "
-        "human-sized, believable, and personal.",
+        "Keep the STAKES LOW, SMALL and LOCAL — this is a first adventure for green, unknown "
+        "novices, the kind of odd job a village posts on a notice board. The ENTIRE problem must fit "
+        "in one settlement and its surroundings and threaten only a handful of ordinary people: a "
+        "missing child or livestock, a stolen heirloom, bandits shaking down a mill, a beast in the "
+        "sheep pens, a soured well, a neighbours' feud, a debt collector, a haunted barn. "
+        "ABSOLUTELY NOT: saving the world/realm/city, ancient prophecies, chosen ones, gods or "
+        "cults with cosmic aims, reality/memory/time unravelling, artifacts of great power, "
+        "cataclysms, or any 'only you can stop this' framing — even as background. Nobody important "
+        "is watching; the reward is modest coin, food, or goodwill. The heroes are green and "
+        "unproven, and the danger is human-sized, mundane and personal.",
     ),
     "heroic": (
         "Heroic & Regional",
@@ -1032,6 +1145,40 @@ SCENARIO_SCALES: dict[str, tuple[str, str]] = {
         "",
     ),
 }
+
+
+#: How the chosen stakes/scale should colour the SCENES themselves (tone, hooks,
+#: how NPCs frame requests). Without this the DM writes world-saving hooks even for
+#: a deliberately small, local adventure.
+_SCENE_SCALE_TONE = {
+    "grounded": (
+        "STAKES — KEEP THEM SMALL AND LOCAL (this adventure is deliberately low-level):\n"
+        "- These are green, no-name adventurers doing an ordinary job. Nobody thinks they are "
+        "special, chosen, or the world's last hope.\n"
+        "- The problem is small, concrete and personal: a missing person or animal, a theft, a "
+        "debt, a spoiled well, a nuisance beast, a family quarrel, a job nobody else will take.\n"
+        "- NEVER frame it as saving the world/realm/city, an ancient prophecy, reality unravelling, "
+        "or 'only you can do this'. NPCs must NOT plead that everything depends on the party.\n"
+        "- NPCs treat them as hired help or passing strangers — practical, sometimes sceptical, "
+        "offering modest pay or a favor. Keep the tone everyday, human-sized and grounded.\n"
+        "- Any larger mystery stays firmly in the background; it is NOT the party's business."
+    ),
+    "heroic": (
+        "STAKES — REGIONAL, NOT APOCALYPTIC:\n"
+        "- Competent but not legendary adventurers. The threat endangers a town or region, not the "
+        "world. Avoid prophecy/chosen-one framing and 'only you can save us' pleas."
+    ),
+    "epic": (
+        "STAKES — EPIC:\n"
+        "- Legendary heroes against a world-shaping threat. Grand, weighty stakes are appropriate."
+    ),
+}
+
+
+def _scene_scale_section(scale: str) -> str:
+    """Prompt section pinning scene tone/stakes to the scenario's chosen scale."""
+    tone = _SCENE_SCALE_TONE.get(scale or "", "")
+    return f"\n{tone}\n" if tone else ""
 
 
 def scenario_scale_options() -> dict[str, str]:
@@ -2001,13 +2148,19 @@ IMAGE / SHOT DIRECTION (frame each scene like a book illustration):
   NPC or the threat, a significant object/discovery, or a tight action moment. Do NOT cram the whole
   cast into every image; most beats are stronger with one clear focus.
 - visual_description must describe THAT one shot (its focus, composition, lighting, mood).
-- image_subjects: list the EXACT names (from assets_present or the party roster) of ONLY the
-  figures/objects actually in that shot's frame. Use an EMPTY list for a pure environment shot.
-  Leave out anyone not in this particular image — only these subjects are drawn and referenced.
-  * This keeps images fitting and fresh, AND prevents other figures from copying a referenced
-    character's clothing/look. If the hero is not the focus of this shot, do not put them in frame.
-  * When two characters (e.g. the hero and an enemy) MUST share the frame, describe each one's
-    DISTINCT clothing and silhouette so they don't blend together.
+- image_subjects: ONLY the figures/objects actually in that shot's frame. For each, give the EXACT
+  name (from assets_present or the party roster) AND a short `action` phrase for what THAT subject is
+  doing/holding in the image. Use an EMPTY list for a pure environment shot.
+  * List them in LEFT-TO-RIGHT order as they appear in the composition. The illustrator places and
+    repaints them in exactly this order, so the order + per-subject actions are what keep characters
+    from being SWAPPED (e.g. the clerk must be the one holding the papers, not the hero).
+  * Each subject's `action` must match what scene_text says THEY are doing — never give one
+    character's action to another.
+  * Leave out anyone not in this particular image — only these subjects are drawn and referenced.
+    This keeps images fitting and fresh AND stops figures copying each other's clothing/look. If the
+    hero is not the focus of this shot, do not put them in frame.
+  * When two characters MUST share the frame, describe each one's DISTINCT clothing and silhouette so
+    they don't blend together.
 
 CRITICAL RULES FOR VISUAL ASSETS (NPCs AND OBJECTS):
 - Include assets_present array listing ALL important NPCs and objects in the scene
@@ -2161,7 +2314,7 @@ Return your response in this JSON structure (ALL FIELDS REQUIRED):
       "is_visible": true | false
     }
   ],
-  "image_subjects": ["Exact name of each figure/object actually in THIS image's frame"] (subset of assets_present/party; [] for an environment-only establishing shot),
+  "image_subjects": [{"name": "Exact name of a figure/object in THIS image's frame", "action": "what THIS subject is doing/holding in the image"}] (left-to-right order; subset of assets_present/party; [] for an environment-only establishing shot),
   "narration_segments": [
     {
       "speaker": "Narrator" | "Exact Character/NPC Name",
@@ -2355,6 +2508,7 @@ async def generate_opening_scene(
     existing_locations: dict[str, Location],
     scene_id: int = 1,
     art_style: Optional[str] = None,
+    scale: str = "any",
 ) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the opening scene for the chosen scenario.
 
@@ -2397,7 +2551,7 @@ SCENARIO: {scenario_name}
 
 SCENARIO DETAILS:
 {scenario_details}
-
+{_scene_scale_section(scale)}
 PARTY CHARACTER SHEETS:
 {character_sheets}
 
@@ -2489,7 +2643,7 @@ Make the scene immersive, clear, and exciting!
 
     # Reference only the art-directed in-frame subjects (reference isolation) so the
     # image fits the beat and other figures don't copy a referenced character's look.
-    image_ref_ids = _resolve_image_subject_ids(
+    image_ref_ids, subject_directions = _resolve_image_subject_ids(
         generated.image_subjects, updated_assets, visible_asset_ids
     )
 
@@ -2508,6 +2662,7 @@ Make the scene immersive, clear, and exciting!
         updated_assets,
         image_ref_ids,
         art_style,
+        subject_directions,
     )
 
     voiceover_task = _generate_scene_voiceover(
@@ -2569,6 +2724,7 @@ async def generate_next_scene(
     existing_assets: dict[str, Asset],
     existing_locations: dict[str, Location],
     art_style: Optional[str] = None,
+    scale: str = "any",
 ) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the next scene based on the story so far and player action.
 
@@ -2670,7 +2826,7 @@ SCENARIO: {scenario_name}
 
 SCENARIO DETAILS:
 {scenario_details}
-
+{_scene_scale_section(scale)}
 PARTY CHARACTER SHEETS:
 {character_sheets}
 
@@ -2739,7 +2895,7 @@ Continue the adventure!
 
     # Reference only the art-directed in-frame subjects (reference isolation) so the
     # image fits the beat and other figures don't copy a referenced character's look.
-    image_ref_ids = _resolve_image_subject_ids(
+    image_ref_ids, subject_directions = _resolve_image_subject_ids(
         generated.image_subjects, updated_assets, visible_asset_ids
     )
 
@@ -2758,6 +2914,7 @@ Continue the adventure!
         updated_assets,
         image_ref_ids,
         art_style,
+        subject_directions,
     )
 
     voiceover_task = _generate_scene_voiceover(

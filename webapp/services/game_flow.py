@@ -182,6 +182,7 @@ async def generate_hero(
     photo_path: pathlib.Path | None = None,
     custom_name: str | None = None,
     gender: str = "unspecified",
+    scale: str = "any",
 ) -> Character:  # type: ignore
     """Generate a single hero (lore + portrait) from a chosen archetype."""
     return await generator.generate_hero(
@@ -195,6 +196,7 @@ async def generate_hero(
         custom_name=custom_name,
         gender=gender,
         avoid_names=_used_names(),
+        scale=scale,
     )
 
 

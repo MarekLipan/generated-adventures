@@ -157,6 +157,7 @@ class ImageGenerator(ABC):
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
         art_style: Optional[str] = None,
+        subject_directions: Optional[List[str]] = None,
     ) -> Optional[pathlib.Path]:
         """Generate a scene image with optional character references.
 
@@ -234,6 +235,7 @@ class GeminiImageGenerator(ImageGenerator):
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
         art_style: Optional[str] = None,
+        subject_directions: Optional[List[str]] = None,
     ) -> Optional[pathlib.Path]:
         """Generate scene image with Gemini (supports reference images)."""
         from google.genai import types as genai_config  # type: ignore
@@ -641,6 +643,7 @@ class FluxKontextImageGenerator(ImageGenerator):
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
         art_style: Optional[str] = None,
+        subject_directions: Optional[List[str]] = None,
     ) -> Optional[pathlib.Path]:
         """Generate a scene image, keeping characters consistent via references.
 
@@ -749,6 +752,10 @@ class FluxKleinImageGenerator(ImageGenerator):
 
             hf_token = settings.HUGGING_FACE_HUB_TOKEN or None
             self.cpu_offload_enabled = False
+            # Which offload strategy is active ("model" | "sequential" | None).
+            # Tracked so it can be re-applied if accelerate's hooks are ever removed
+            # (e.g. diffusers' from_pipe strips them off shared components).
+            self._offload_mode = None
 
             # Fast path: bitsandbytes-quantized transformer + text encoder on CUDA.
             # Both modules are loaded already quantized, so model-level CPU offload
@@ -764,6 +771,7 @@ class FluxKleinImageGenerator(ImageGenerator):
                     )
                     self.pipe.enable_model_cpu_offload(device=self.device)
                     self.cpu_offload_enabled = True
+                    self._offload_mode = "model"
                     logger.info(
                         f"✓ Klein loaded via bitsandbytes ({klein_quant}) "
                         "with model CPU offload"
@@ -806,12 +814,14 @@ class FluxKleinImageGenerator(ImageGenerator):
 
                     if not fits_whole_module:
                         self.pipe.enable_sequential_cpu_offload(device=self.device)
+                        self._offload_mode = "sequential"
                         logger.info(
                             f"✓ Sequential CPU offload enabled (bfloat16; VRAM "
                             f"{vram_gb:.0f} GB too small for whole-module offload)"
                         )
                     else:
                         self.pipe.enable_model_cpu_offload(device=self.device)
+                        self._offload_mode = "model"
                         logger.info("✓ Model CPU offload enabled (bfloat16 model)")
                     self.cpu_offload_enabled = True
                 except Exception as offload_err:
@@ -1000,12 +1010,192 @@ class FluxKleinImageGenerator(ImageGenerator):
             logger.error(f"FLUX.2 Klein character generation failed: {e}")
             return None
 
+    def _reapply_offload(self, pipe) -> None:
+        """Re-enable the configured CPU-offload strategy on `pipe`.
+
+        diffusers' `from_pipe` strips accelerate's offload hooks off the shared
+        modules; those hooks also handle device/dtype placement, so without this
+        the next decode fails ("Input type BFloat16 and bias type float"). Both
+        the base and inpaint pipelines share modules, so re-hooking covers both.
+        """
+        mode = getattr(self, "_offload_mode", None)
+        if not mode:
+            return
+        try:
+            if mode == "sequential":
+                pipe.enable_sequential_cpu_offload(device=self.device)
+            else:
+                pipe.enable_model_cpu_offload(device=self.device)
+        except Exception as e:  # noqa: BLE001 - already-hooked pipelines raise; harmless
+            logger.debug(f"Offload re-apply skipped: {e}")
+
+    def _get_inpaint_pipe(self):
+        """Lazily build the Klein inpaint pipeline from the loaded pipeline's parts.
+
+        `from_pipe` reuses the already-resident transformer/text-encoder/VAE, so
+        this costs no extra VRAM and no extra download — but it also REMOVES the
+        offload hooks from those shared modules, which would break the base
+        pipeline's next decode. We therefore re-apply offload to both pipelines.
+        Returns None if the installed diffusers has no Klein inpaint pipeline.
+        """
+        if getattr(self, "_inpaint_pipe", None) is not None:
+            return self._inpaint_pipe
+        try:
+            from diffusers import Flux2KleinInpaintPipeline
+        except ImportError:
+            logger.warning("Flux2KleinInpaintPipeline unavailable in this diffusers build")
+            return None
+        try:
+            self._inpaint_pipe = Flux2KleinInpaintPipeline.from_pipe(self.pipe)
+            # from_pipe detached the offload hooks from the shared modules —
+            # restore them on both pipelines before either is used again.
+            self._reapply_offload(self._inpaint_pipe)
+            self._reapply_offload(self.pipe)
+            logger.info("✓ Klein inpaint pipeline ready (shared components)")
+            return self._inpaint_pipe
+        except Exception as e:  # noqa: BLE001 - fall back to single-pass rendering
+            logger.warning(f"Could not build Klein inpaint pipeline: {e}")
+            self._inpaint_pipe = None
+            # Make sure the base pipeline is still usable even if from_pipe half-ran.
+            self._reapply_offload(self.pipe)
+            return None
+
+    @staticmethod
+    def _subject_regions(n: int, width: int, height: int) -> List[tuple]:
+        """Split the frame into n side-by-side subject regions (left→right).
+
+        Regions overlap slightly and leave headroom/footroom so a repainted figure
+        blends into the surrounding plate instead of ending on a hard rectangle.
+        """
+        regions = []
+        band = width / max(n, 1)
+        pad = band * 0.10
+        top = int(height * 0.06)
+        bottom = int(height * 0.98)
+        for i in range(n):
+            left = max(0, int(i * band - pad))
+            right = min(width, int((i + 1) * band + pad))
+            regions.append((left, top, right, bottom))
+        return regions
+
+    @staticmethod
+    def _slot_names(n: int) -> List[str]:
+        """Human position labels for the left→right subject slots."""
+        if n == 1:
+            return ["center"]
+        if n == 2:
+            return ["left", "right"]
+        if n == 3:
+            return ["left", "center", "right"]
+        return [f"position {i + 1} from the left" for i in range(n)]
+
+    def _composite_scene(
+        self,
+        prompt: str,
+        suffix: str,
+        refs: List["Image.Image"],
+        subject_directions: Optional[List[str]] = None,
+    ):
+        """Render a scene, then repaint each subject with only their own reference.
+
+        Pass 1 establishes composition/lighting with all references (poses and
+        placement come out coherent). Passes 2..n+1 mask one subject's region at a
+        time and re-render it conditioned on that subject's portrait ALONE — so one
+        character's clothing can never bleed onto another.
+
+        `subject_directions` (parallel to `refs`) says who each subject is and what
+        they are doing. It is used to pin each subject to a specific left→right slot
+        in the base prompt AND in its own refinement pass, so the figure we repaint
+        with a given portrait is the one actually meant to be there (otherwise the
+        model may place them in a different order and characters get swapped).
+        """
+        from PIL import ImageDraw, ImageFilter
+
+        n = len(refs)
+        width, height = 1024, 768
+        slots = self._slot_names(n)
+        directions = list(subject_directions or [])
+        if len(directions) != n:
+            directions = []
+
+        if directions:
+            layout = " ".join(
+                f"On the {slot}: {d}." for slot, d in zip(slots, directions)
+            )
+            base_prompt = (
+                f"{prompt}. Place the characters exactly as follows, each clearly "
+                f"separated and distinctly dressed: {layout} "
+                f"Wide cinematic composition, landscape orientation. {suffix}"
+            )
+        else:
+            base_prompt = (
+                f"{prompt}. {n} distinct characters, each clearly separated and distinctly "
+                f"dressed, evenly spaced across the frame. "
+                f"Wide cinematic composition, landscape orientation. {suffix}"
+            )
+        # Render the base plate FIRST, with the untouched pipeline. Building the
+        # inpaint pipeline mutates shared modules, so doing it before this render
+        # risks losing the whole image; this way a refinement failure only costs
+        # us the polish, never the scene.
+        logger.info(f"FLUX.2 Klein: compositing scene — base pass ({n} subjects)...")
+        with _GPU_LOCK:
+            canvas = self.pipe(
+                prompt=base_prompt,
+                image=refs,
+                guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                height=height,
+                width=width,
+                generator=self._make_generator(),
+            ).images[0]
+
+        inpaint = self._get_inpaint_pipe()
+        if inpaint is None:
+            # No masked-refinement available — the base plate is still a valid
+            # scene (equivalent to the old single-pass render), so keep it.
+            logger.info("Compositing: no inpaint pipeline; using base render")
+            return canvas
+
+        strength = float(settings.IMAGE_COMPOSITE_STRENGTH)
+        for i, (ref, box) in enumerate(zip(refs, self._subject_regions(n, width, height)), 1):
+            mask = Image.new("L", (width, height), 0)
+            ImageDraw.Draw(mask).rectangle(box, fill=255)
+            # Feather the mask so the repainted region blends with the plate.
+            mask = mask.filter(ImageFilter.GaussianBlur(24))
+            who = directions[i - 1] if directions else ""
+            subject_prompt = (
+                (f"This is {who}. " if who else "")
+                + "Repaint ONLY this character to exactly match the reference portrait — "
+                "same face, hair, clothing and gear. Keep the existing pose, scale, "
+                f"lighting and background. {suffix}"
+            )
+            logger.info(f"FLUX.2 Klein: compositing subject {i}/{n}...")
+            try:
+                with _GPU_LOCK:
+                    canvas = inpaint(
+                        prompt=subject_prompt,
+                        image=canvas,
+                        image_reference=[ref],
+                        mask_image=mask,
+                        strength=strength,
+                        guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
+                        num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
+                        height=height,
+                        width=width,
+                        generator=self._make_generator(),
+                    ).images[0]
+            except Exception as e:  # noqa: BLE001 - keep whatever we have so far
+                logger.warning(f"Subject {i} refinement failed ({e}); keeping current render")
+                break
+        return canvas
+
     def generate_scene_image(
         self,
         prompt: str,
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
         art_style: Optional[str] = None,
+        subject_directions: Optional[List[str]] = None,
     ) -> Optional[pathlib.Path]:
         try:
             suffix = self._style_suffix(art_style)
@@ -1042,6 +1232,31 @@ class FluxKleinImageGenerator(ImageGenerator):
                 refs = [_pad_to_square(Image.open(p), ref_size) for p in existing]
 
                 n = len(refs)
+                # With 2+ references in a single render, Klein conditions on them
+                # globally and their looks cross-contaminate (an enemy ends up in the
+                # hero's clothes). Render the scene once for composition, then repaint
+                # each subject's own region using ONLY that subject's reference.
+                if n > 1 and settings.IMAGE_SCENE_COMPOSITE:
+                    try:
+                        composed = self._composite_scene(
+                            prompt, suffix, refs, subject_directions
+                        )
+                    except Exception as comp_err:  # noqa: BLE001 - never lose the scene
+                        logger.warning(
+                            f"Scene compositing failed ({comp_err}); "
+                            "falling back to a single multi-reference render"
+                        )
+                        # from_pipe may have detached offload hooks — restore them
+                        # so the fallback render below still works.
+                        self._reapply_offload(self.pipe)
+                        composed = None
+                    if composed is not None:
+                        composed.save(output_path)
+                        logger.info(
+                            f"✓ FLUX.2 Klein: Saved composited scene ({n} subjects) to {output_path}"
+                        )
+                        return output_path
+
                 enhanced_prompt = (
                     f"Keep all {n} reference character(s) consistent — same face, "
                     f"hair, clothing and gear. {prompt}. "
@@ -1167,6 +1382,7 @@ class HttpImageGenerator(ImageGenerator):
         output_path: pathlib.Path,
         reference_images: Optional[List[pathlib.Path]] = None,
         art_style: Optional[str] = None,
+        subject_directions: Optional[List[str]] = None,
     ) -> Optional[pathlib.Path]:
         data = {"prompt": prompt}
         if art_style:

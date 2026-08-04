@@ -38,6 +38,35 @@ def _coerce_inventory_item(v):
 
 # Inventory field element: a structured item, but tolerant of legacy string form.
 InvItem = Annotated[InventoryItem, BeforeValidator(_coerce_inventory_item)]
+
+
+class ImageSubject(BaseModel):
+    """One figure/object in a scene illustration, with what it is doing in frame.
+
+    The action is what binds an identity to a place in the composition: the
+    renderer lays subjects out left-to-right in this order and repaints each one
+    using its own reference portrait plus this action, so characters cannot end up
+    swapped (e.g. the clerk holding the papers, not the hero).
+    """
+
+    name: str = Field(
+        ..., description="EXACT name of the character/NPC/object (as in assets_present or the party)"
+    )
+    action: str = Field(
+        "",
+        description="Short phrase for what THIS subject is doing/holding in the illustration "
+        "(e.g. 'leaning against a stack of crates', 'holding out a sheet of papers').",
+    )
+
+
+def _coerce_image_subject(v):
+    """Accept a bare name string as a subject with no stated action."""
+    if isinstance(v, str):
+        return {"name": v, "action": ""}
+    return v
+
+
+ImgSubject = Annotated[ImageSubject, BeforeValidator(_coerce_image_subject)]
 ArtStyle = Literal["painterly_hero", "artstation_realism"]
 
 
@@ -442,7 +471,7 @@ class GeneratedArchetype(BaseModel):
     )
     concept: str = Field(
         ...,
-        description="Visual concept for the portrait: costume, equipment, silhouette, and vibe (2-3 sentences). No facial features — those come from the player's photo when provided.",
+        description="Visual concept for the portrait: costume, equipment, silhouette, and vibe (2-3 sentences). No facial features — those come from the player's photo when provided. Do NOT put a hood, cowl, helmet or mask over the head/face — the portrait must show the face and hair clearly (they can wear one in later scenes).",
     )
 
 
@@ -672,14 +701,16 @@ class GeneratedScene(BaseModel):
         default_factory=list,
         description="List of important NPCs and objects present in this scene. Include any significant characters or items that should have consistent visual representation. MUST reuse existing asset names when referring to already-introduced NPCs/objects.",
     )
-    image_subjects: Optional[List[str]] = Field(
+    image_subjects: Optional[List[ImgSubject]] = Field(
         None,
-        description="Art direction for the scene ILLUSTRATION: the EXACT names (from assets_present or "
-        "the party) of only the characters/NPCs/objects actually IN this one image's frame — a subset, "
-        "chosen like a book illustrator framing the beat. Use an EMPTY list for a pure environment / "
+        description="Art direction for the scene ILLUSTRATION: only the characters/NPCs/objects actually "
+        "IN this one image's frame — a subset, chosen like a book illustrator framing the beat. For each, "
+        "give the EXACT name (from assets_present or the party) AND a short action phrase for what THAT "
+        "subject is doing/holding in frame. List them in LEFT-TO-RIGHT order as they appear in the "
+        "composition; the renderer places and repaints them in exactly this order, so the order and the "
+        "actions are what keep characters from being swapped. Use an EMPTY list for a pure environment / "
         "establishing shot with no figures. Only these subjects are drawn and only their reference "
-        "portraits are used, so leave out anyone not in this particular shot (this also stops other "
-        "figures from copying a referenced character's look). Omit/null only if unsure.",
+        "portraits are used (which also stops figures copying each other's look). Omit/null only if unsure.",
     )
     narration_segments: List[NarrationSegment] = Field(
         default_factory=list,

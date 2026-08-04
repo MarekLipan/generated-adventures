@@ -134,6 +134,7 @@ async def generate_opening_scene(game_id: str):
         game.assets,
         game.locations,
         art_style=game.art_style,
+        scale=getattr(scenario, "scale", "") or "any",
     )
     game.scenes.append(opening_scene)
     game.characters = updated_characters  # Update character states
@@ -216,6 +217,7 @@ async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[
         existing_assets=game_state.assets,
         existing_locations=game_state.locations,
         art_style=game_state.art_style,
+        scale=getattr(scenario, "scale", "") or "any",
     )
     game_state.scenes.append(next_scene)
     game_state.characters = updated_characters  # Update character states
