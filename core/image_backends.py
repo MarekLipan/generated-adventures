@@ -914,6 +914,42 @@ class FluxKleinImageGenerator(ImageGenerator):
             local_files_only=offline,
         )
 
+    def _patch_vae_decode_dtype(self) -> None:
+        """Make VAE decoding tolerant of a latent/weight dtype mismatch.
+
+        The Flux2 pipelines hand `latents` straight to `vae.decode()` without
+        casting, so if the VAE's weights are float32 while the transformer runs in
+        bfloat16 the decode dies with "Input type (struct c10::BFloat16) and bias
+        type (float) should be the same". Accelerate's offload hooks normally hide
+        this by aligning inputs, so it only surfaces when those hooks are absent
+        (e.g. after `from_pipe` detaches them to build the inpaint pipeline).
+
+        Casting the small latent tensor to the VAE's own dtype fixes it at the
+        source, for every pipeline sharing this VAE, regardless of offload mode.
+        """
+        try:
+            vae = self.pipe.vae
+        except AttributeError:
+            return
+        if getattr(vae, "_decode_dtype_patched", False):
+            return
+        original_decode = vae.decode
+
+        def decode(z, *args, **kwargs):
+            try:
+                target = next(vae.post_quant_conv.parameters()).dtype
+                if hasattr(z, "dtype") and z.dtype != target:
+                    z = z.to(target)
+            except Exception:  # noqa: BLE001 - never block a decode over this
+                pass
+            return original_decode(z, *args, **kwargs)
+
+        try:
+            vae.decode = decode
+            vae._decode_dtype_patched = True
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Could not patch VAE decode dtype: {e}")
+
     def _finalize_vae(self) -> None:
         """Enable VAE slicing/tiling to reduce peak memory during decode."""
         try:
@@ -922,6 +958,8 @@ class FluxKleinImageGenerator(ImageGenerator):
                 self.pipe.vae.enable_tiling()
         except Exception:
             pass
+        # Guard against latent/VAE dtype mismatches at decode time (see above).
+        self._patch_vae_decode_dtype()
 
     def _get_device(self) -> str:
         import torch
