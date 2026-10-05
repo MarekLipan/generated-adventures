@@ -150,6 +150,14 @@ class Settings(BaseSettings):
     # base render's pose/lighting (better blending), higher enforces the reference
     # more strongly (better likeness). 0.75 is a balanced starting point.
     IMAGE_COMPOSITE_STRENGTH: float = 0.75
+    # Run the per-subject inpaint passes on MPS too. Off by default: on a 32 GB
+    # Mac the base pass leaves the MPS pool near its cap, so building the inpaint
+    # pipeline (from_pipe) runs out of memory and every multi-subject scene paid
+    # for a doomed attempt before falling back. Measured on an M1 Max: base pass
+    # ~190 s, so each extra pass would roughly add that again. With this off, MPS
+    # still renders the slot-pinned base pass (subjects placed left->right per
+    # their directions), just without per-subject repainting. CUDA is unaffected.
+    IMAGE_COMPOSITE_INPAINT_ON_MPS: bool = False
     # MPS has no flash-attention kernel, so the full attention matrix is
     # materialized in one allocation. With a multi-character party, 1024px
     # references OOM a 32 GB Mac (a single ~30 GB MTLBuffer); 512px fits with

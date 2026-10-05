@@ -814,6 +814,7 @@ class FluxKleinImageGenerator(ImageGenerator):
                         )
                         self.pipe.enable_model_cpu_offload(device=self.device)
                         self.cpu_offload_enabled = True
+                        self._offload_mode = "model"
                     self._finalize_vae()
                     logger.info("✓ FLUX.2 Klein pipeline ready (GGUF)")
                     return
@@ -1264,7 +1265,7 @@ class FluxKleinImageGenerator(ImageGenerator):
         from PIL import ImageDraw, ImageFilter
 
         n = len(refs)
-        width, height = 1024, 768
+        width, height = self._scene_size()
         slots = self._slot_names(n)
         directions = list(subject_directions or [])
         if len(directions) != n:
@@ -1300,6 +1301,12 @@ class FluxKleinImageGenerator(ImageGenerator):
                 width=width,
                 generator=self._make_generator(),
             ).images[0]
+
+        if self.device == "mps" and not settings.IMAGE_COMPOSITE_INPAINT_ON_MPS:
+            # The slot-pinned base plate already carries the layout; the repaint
+            # passes don't fit in unified memory alongside it (see config).
+            logger.info("Compositing: inpaint passes off on MPS; using base render")
+            return canvas
 
         inpaint = self._get_inpaint_pipe()
         if inpaint is None:
