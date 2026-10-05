@@ -1,6 +1,6 @@
 """Test the new change-based character update system."""
 
-from core.generator import _apply_character_updates
+from core.character_updates import apply_character_updates
 from core.models import (
     Character,
     CharacterHealthChange,
@@ -51,7 +51,7 @@ def test_health_change_damage():
     )
 
     # Apply changes
-    updated = _apply_character_updates([char], scene)
+    updated = apply_character_updates([char], scene)
 
     # Verify health decreased by 15
     assert updated[0].current_health == 85
@@ -99,7 +99,7 @@ def test_health_change_healing():
     )
 
     # Apply changes
-    updated = _apply_character_updates([char], scene)
+    updated = apply_character_updates([char], scene)
 
     # Verify health increased by 25
     assert updated[0].current_health == 85
@@ -146,7 +146,7 @@ def test_health_change_caps_at_maximum():
     )
 
     # Apply changes
-    updated = _apply_character_updates([char], scene)
+    updated = apply_character_updates([char], scene)
 
     # Verify health capped at maximum
     assert updated[0].current_health == 100
@@ -198,7 +198,7 @@ def test_inventory_changes():
     )
 
     # Apply changes
-    updated = _apply_character_updates([char], scene)
+    updated = apply_character_updates([char], scene)
 
     # Verify inventory updated correctly
     names = _item_names(updated[0])
@@ -242,7 +242,7 @@ def test_no_changes():
     )
 
     # Apply changes
-    updated = _apply_character_updates([char], scene)
+    updated = apply_character_updates([char], scene)
 
     # Verify nothing changed
     assert updated[0].current_health == 75
@@ -316,7 +316,7 @@ def test_multiple_character_changes():
     )
 
     # Apply changes
-    updated = _apply_character_updates([char1, char2], scene)
+    updated = apply_character_updates([char1, char2], scene)
 
     # Verify both characters updated correctly
     alice = next(c for c in updated if c.name == "Alice")
