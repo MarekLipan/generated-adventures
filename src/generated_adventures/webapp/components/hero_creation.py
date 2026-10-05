@@ -16,8 +16,8 @@ import re
 
 from nicegui import ui
 
-from webapp.services import game_flow
-from webapp.utils import show_api_error, show_loading
+from generated_adventures.webapp.services import game_flow
+from generated_adventures.webapp.utils import show_api_error, show_loading
 
 from .character_display import render_character_cards
 from .party import show_character_overview

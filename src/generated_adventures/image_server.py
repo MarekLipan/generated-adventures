@@ -6,7 +6,7 @@ keeps it warm in GPU memory, and serves generation over HTTP. The game (or any
 device on the same LAN) becomes a thin client via IMAGE_PROVIDER="http".
 
 Run it:
-    uv run python image_server.py
+    uv run adventures-image-server
 
 Key design points for a single-GPU box:
   * ONE model instance, ONE worker. Never run with multiple uvicorn workers — each
@@ -30,8 +30,8 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
-from core.config import settings
-from core.image_backends import _local_backend_for_server
+from generated_adventures.core.config import settings
+from generated_adventures.core.image_backends import _local_backend_for_server
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("image_server")

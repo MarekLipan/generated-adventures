@@ -17,8 +17,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from core.media import media_path
-from core.models import Character
+from generated_adventures.core.media import media_path
+from generated_adventures.core.models import Character
 
 
 def generate_character_sheet_pdf(character: Character, game_id: str = None) -> bytes:

@@ -1,7 +1,7 @@
 # Scene Narration (Text-to-Speech)
 
 The game narrates each scene with a text-to-speech backend, selected by
-`TTS_PROVIDER` in `.env` / `core/config.py`:
+`TTS_PROVIDER` in `.env` / `src/generated_adventures/core/config.py`:
 
 | Provider | Cost | Runs on | Notes |
 |----------|------|---------|-------|
@@ -9,7 +9,7 @@ The game narrates each scene with a text-to-speech backend, selected by
 | `gemini` | Paid, cloud | API | Google Gemini TTS. Expressive; requires `GOOGLE_API_KEY`. |
 | `none` | — | — | Disables narration. |
 
-Backends live in [`core/tts_backends.py`](core/tts_backends.py) and all emit a
+Backends live in [`tts_backends.py`](src/generated_adventures/core/tts_backends.py) and all emit a
 24 kHz / 16-bit / mono WAV, which the web UI plays back.
 
 ## Kokoro setup (default)
@@ -50,6 +50,6 @@ deliberately.
 
 - Narration is **optional**: if the model files are missing or a backend fails
   to initialize, the game logs a warning and continues silently (no audio).
-- The model loads once (lazy singleton in `core/generator.py`) and stays warm.
+- The model loads once (lazy singleton in `core/media.py`) and stays warm.
 - On a local-GPU image setup (`IMAGE_PROVIDER=flux-klein`), Kokoro deliberately
   stays on the CPU so it doesn't contend with FLUX for VRAM.

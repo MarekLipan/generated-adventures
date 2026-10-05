@@ -7,8 +7,8 @@ import json
 
 from pydantic_ai.messages import ModelResponse, TextPart
 
-from core.generation.recap import generate_scene_recap
-from core.models import Scene
+from generated_adventures.core.generation.recap import generate_scene_recap
+from generated_adventures.core.models import Scene
 
 SCENES = [
     Scene(id=1, text="The party crosses the frozen pass."),

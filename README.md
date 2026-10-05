@@ -35,8 +35,8 @@ Renders portraits, a one-character scene and a multi-character scene with your
 configured backend, and prints how long each step took. Output goes to `test_images/`.
 
 ### How to Run
-1. `uv run uvicorn webapp.main:app --reload` for playing the game.
-2. `SHOW_DM_NOTES=1 uv run uvicorn webapp.main:app --reload` for playing the game with DM notes visible.
+1. `uv run adventures` and open http://127.0.0.1:8000.
+2. `uv run adventures --reload` while developing (restarts on code changes).
 
 ### App Flow
 1. User is prompted to enter a how many players will be playing the adventure.

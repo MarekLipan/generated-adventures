@@ -31,6 +31,17 @@ dependencies = [
     "google-genai>=1.29.0",
 ]
 
+[project.scripts]
+adventures = "generated_adventures.webapp.cli:main"
+adventures-image-server = "generated_adventures.image_server:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/generated_adventures"]
+
 # On Windows, torch comes from the PyTorch CUDA 12.6 wheel index, and
 # torchvision uses the CPU wheel — the CUDA build has a broken _C extension
 # on Windows/Python 3.13 (torchvision::nms operator not found), but the CPU
@@ -57,9 +68,6 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-[tool.setuptools]
-packages = ["core", "webapp"]
-
 [dependency-groups]
 dev = [
     "pyrefly>=1.3.2",
@@ -70,9 +78,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The project is not installed as a package yet (no [build-system]), so make
-# `core`/`webapp` importable from the repo root.
-pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
     "live: calls a real external API and needs credentials; run with `pytest -m live`",
@@ -96,7 +101,7 @@ select = [
 extend-immutable-calls = ["fastapi.File"]
 
 [tool.pyrefly]
-project-includes = ["core", "webapp", "tests", "scripts", "image_server.py"]
+project-includes = ["src", "tests", "scripts"]
 preset = "default"
 # Errors present when type checking was adopted. CI fails only on errors that
 # are not in here; shrink it with `pyrefly check --prune-baseline` as you fix them.

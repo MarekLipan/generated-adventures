@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pathlib
 
-from core import game, media, persistence, prompts
-from core.generation import characters, recap, scenarios
-from core.models import (
+from generated_adventures.core import game, media, persistence, prompts
+from generated_adventures.core.generation import characters, recap, scenarios
+from generated_adventures.core.models import (
     Character,
     Game,
     GeneratedArchetype,

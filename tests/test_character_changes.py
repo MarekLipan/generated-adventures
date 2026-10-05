@@ -1,7 +1,7 @@
 """Test the new change-based character update system."""
 
-from core.character_updates import apply_character_updates
-from core.models import (
+from generated_adventures.core.character_updates import apply_character_updates
+from generated_adventures.core.models import (
     Character,
     CharacterHealthChange,
     CharacterInventoryChange,

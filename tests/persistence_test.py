@@ -2,7 +2,7 @@
 
 import pytest
 
-from core import game, persistence
+from generated_adventures.core import game, persistence
 
 
 @pytest.fixture(autouse=True)

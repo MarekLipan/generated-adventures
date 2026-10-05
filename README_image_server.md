@@ -20,7 +20,7 @@ On the GPU machine, set the backend to host and start it:
 ```bash
 # In the server's environment (.env), host the fast local backend:
 #   IMAGE_PROVIDER=flux-klein
-uv run python image_server.py
+uv run adventures-image-server
 ```
 
 Startup loads and quantizes the model, then runs one warmup generation. When you
@@ -108,7 +108,7 @@ automatically.
 
 Interactive docs at `http://<server>:8000/docs`.
 
-## Configuration reference (`core/config.py`)
+## Configuration reference (`src/generated_adventures/core/config.py`)
 
 | Setting                 | Default                 | Purpose                                  |
 |-------------------------|-------------------------|------------------------------------------|

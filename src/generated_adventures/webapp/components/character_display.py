@@ -4,7 +4,7 @@ import html
 
 from nicegui import ui
 
-from webapp.utils.pdf_generator import generate_character_sheet_pdf
+from generated_adventures.webapp.utils.pdf_generator import generate_character_sheet_pdf
 
 
 def _hp_state(current: int, maximum: int) -> str:

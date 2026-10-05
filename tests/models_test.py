@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from core.models import PromptType
+from generated_adventures.core.models import PromptType
 
 
 def test_dice_check_requires_target():

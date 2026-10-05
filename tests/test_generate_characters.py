@@ -2,8 +2,8 @@
 
 from pydantic_ai.messages import ModelResponse, TextPart
 
-from core.generation import characters
-from core.models import GeneratedCharacter, GeneratedCharacterList
+from generated_adventures.core.generation import characters
+from generated_adventures.core.models import GeneratedCharacter, GeneratedCharacterList
 
 
 def _concept(name: str) -> GeneratedCharacter:

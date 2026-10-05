@@ -6,8 +6,8 @@ Opt-in: costs a real API call. Run with `pytest -m live` and GOOGLE_API_KEY set.
 import pytest
 from PIL import Image
 
-from core.config import settings
-from core.image_backends import GeminiImageGenerator
+from generated_adventures.core.config import settings
+from generated_adventures.core.image_backends import GeminiImageGenerator
 
 pytestmark = pytest.mark.live
 

@@ -9,16 +9,15 @@ from fastapi.staticfiles import StaticFiles
 from nicegui import app as nicegui_app
 from nicegui import ui
 
-from core import media
-from webapp.services import game_flow
+from generated_adventures.core import media
+from generated_adventures.webapp.services import game_flow
 
 from .components.resume import resume_game
 
 # Component imports (UI flow steps)
 from .components.scenarios import show_scenarios
 
-# Show INFO logs from the game modules alongside Uvicorn's own output. (This used
-# to happen as a side effect of importing core.generator.)
+# Show INFO logs from the game modules alongside Uvicorn's own output.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 

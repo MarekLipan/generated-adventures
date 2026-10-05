@@ -3,7 +3,7 @@ import logging
 
 from nicegui import ui
 
-from webapp.services import game_flow
+from generated_adventures.webapp.services import game_flow
 
 from .hero_creation import start_hero_creation
 

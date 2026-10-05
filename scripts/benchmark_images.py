@@ -15,14 +15,10 @@ Images are written to test_images/ (gitignored) for side-by-side comparison.
 import argparse
 import logging
 import pathlib
-import sys
 import time
 
-# Run from a checkout without installing the project.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-
-from core.config import settings  # noqa: E402
-from core.image_backends import get_image_generator  # noqa: E402
+from generated_adventures.core.config import settings
+from generated_adventures.core.image_backends import get_image_generator
 
 PARTY = [
     (

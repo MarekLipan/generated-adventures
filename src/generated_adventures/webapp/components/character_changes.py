@@ -2,7 +2,7 @@
 
 from nicegui import ui
 
-from core.models import Scene
+from generated_adventures.core.models import Scene
 
 
 def render_character_changes(scene: Scene):

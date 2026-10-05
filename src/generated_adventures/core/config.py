@@ -175,7 +175,7 @@ class Settings(BaseSettings):
     # ── Remote inference service (image_server.py) ──────────────────────────────
     # The server loads the local backend (flux-klein) once, keeps it warm,
     # and serves generation over HTTP. Run it with:
-    #     uv run python image_server.py
+    #     uv run adventures-image-server
     # The server reads IMAGE_PROVIDER to decide which local backend to host, so set
     # that to e.g. "flux-klein" IN THE SERVER's environment, and "http" in the CLIENT
     # (game) environment.

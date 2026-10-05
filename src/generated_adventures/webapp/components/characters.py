@@ -3,8 +3,8 @@ import logging
 
 from nicegui import ui
 
-from core.models import Character
-from webapp.services import game_flow
+from generated_adventures.core.models import Character
+from generated_adventures.webapp.services import game_flow
 
 from .party import show_character_overview
 

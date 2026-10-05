@@ -4,8 +4,8 @@ import pytest
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.profiles import ModelProfile
 
-from core import llm
-from core.models import Character
+from generated_adventures.core import llm
+from generated_adventures.core.models import Character
 
 
 @pytest.fixture

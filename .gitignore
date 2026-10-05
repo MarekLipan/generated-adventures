@@ -212,9 +212,7 @@ __marimo__/
 # vscode
 .vscode/
 
-# Generated Adventures — ignore generated game assets, but keep app CSS/JS source
-webapp/static/*
-!webapp/static/css/
+# Benchmark renders from scripts/benchmark_images.py
 test_images/
 
 # Local model weights (downloaded on setup, never committed — see README_tts.md)
