@@ -435,8 +435,8 @@ class FluxKleinImageGenerator(ImageGenerator):
 
         except ImportError as e:
             raise ImportError(
-                "FLUX.2 Klein requires diffusers>=0.38.0:\n"
-                "  pip install -U diffusers\n"
+                "FLUX.2 Klein needs the local image dependencies (diffusers>=0.38):\n"
+                "  uv sync --group local-image\n"
                 f"Error: {e}"
             ) from e
 

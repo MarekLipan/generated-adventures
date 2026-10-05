@@ -6,29 +6,15 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.116.1",
-    "pydantic-ai>=0.6.2",
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
-    "nicegui>=1.4.0",
-    "uvicorn>=0.35.0",
-    "Pillow>=10.5.0",
-    "reportlab>=4.0.0",
-    "httpx>=0.27.0",
-    "diffusers>=0.35.0",
-    "torch>=2.7.0",
-    "torchvision>=0.22.0",
-    "transformers>=4.57.3",
-    "accelerate>=1.12.0",
-    "safetensors>=0.7.0",
-    "protobuf>=5.29.5",
-    "gguf>=0.10.0",
-    # 4-bit/8-bit quantization for the FLUX.2 Klein CUDA backend. No macOS wheels
-    # (CUDA/Linux/Windows only); the Klein bnb path is guarded to CUDA anyway.
-    "bitsandbytes>=0.48.0; sys_platform != 'darwin'",
-    # Local text-to-speech for scene narration (Kokoro-82M via onnxruntime, CPU).
-    # Runs off the GPU, so narration generates in parallel with image generation.
-    "kokoro-onnx>=0.4.0",
     "google-genai>=1.29.0",
+    "httpx>=0.27.0",
+    "nicegui>=1.4.0",
+    "Pillow>=10.5.0",
+    "pydantic>=2.0",
+    "pydantic-ai>=0.6.2",
+    "pydantic-settings>=2.0",
+    "reportlab>=4.0.0",
+    "uvicorn>=0.35.0",
 ]
 
 [project.scripts]
@@ -50,6 +36,9 @@ packages = ["src/generated_adventures"]
 # On macOS (Apple Silicon) the PyTorch CUDA/CPU indexes have no wheels, so we
 # let torch/torchvision resolve from the default PyPI index, which ships
 # arm64 builds with Metal (MPS) acceleration.
+[tool.uv]
+default-groups = ["dev", "local-image", "local-tts"]
+
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cu126", marker = "sys_platform == 'win32'" },
@@ -69,6 +58,26 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [dependency-groups]
+# Local models. Installed by default (see default-groups below); a cloud-only
+# setup (Gemini for text, images and narration) can skip them with
+# `uv sync --no-group local-image --no-group local-tts`.
+local-image = [
+    "accelerate>=1.12.0",
+    "diffusers>=0.35.0",
+    "gguf>=0.10.0",
+    "safetensors>=0.7.0",
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+    "transformers>=4.57.3",
+    # 4-bit/8-bit quantization for the Klein CUDA path. No macOS wheels; the
+    # bitsandbytes path only runs on CUDA anyway.
+    "bitsandbytes>=0.48.0; sys_platform != 'darwin'",
+]
+# Kokoro-82M narration via onnxruntime, on the CPU so it runs alongside image
+# generation without competing for the GPU.
+local-tts = [
+    "kokoro-onnx>=0.4.0",
+]
 dev = [
     "pyrefly>=1.3.2",
     "pytest>=9.1.1",
