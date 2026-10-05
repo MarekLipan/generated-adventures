@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from dataclasses import dataclass
 
 from nicegui import ui
 
@@ -59,10 +60,53 @@ def render_scene_navigation(game_state, scene_index, render_scene_callback):
                 ui.label("").classes("w-32")
 
 
-def render_game_completed(
-    main_container, scene, game_state, scene_index, render_scene_callback
+@dataclass(frozen=True)
+class _Ending:
+    """Text and colors that differ between the victory and defeat screens."""
+
+    panel: str
+    title: str
+    title_classes: str
+    message_panel: str
+    message_title: str
+    message_title_classes: str
+    message: str
+    heroes: str
+    heroes_classes: str
+    scene_suffix: str
+
+
+_VICTORY = _Ending(
+    panel="fantasy-panel w-full max-w-4xl border-4 border-yellow-500 shadow-2xl",
+    title="🏆 QUEST COMPLETED! 🏆",
+    title_classes="text-h3 mb-4 text-yellow-400 text-center font-bold",
+    message_panel="fantasy-panel w-full max-w-4xl bg-yellow-900/20",
+    message_title="✨ The Adventure Concludes in Glory! ✨",
+    message_title_classes="text-h5 text-center text-yellow-300 mb-4",
+    message="Your party has successfully completed their quest. Their names will be remembered in legend!",
+    heroes="👥 Victorious Heroes",
+    heroes_classes="text-h6 mb-4 fantasy-text-gold text-center",
+    scene_suffix="The Conclusion",
+)
+_DEFEAT = _Ending(
+    panel="fantasy-panel w-full max-w-4xl border-4 border-red-500 shadow-2xl",
+    title="💀 GAME OVER 💀",
+    title_classes="text-h3 mb-4 text-red-400 text-center font-bold",
+    message_panel="fantasy-panel w-full max-w-4xl bg-red-900/20",
+    message_title="⚰️ The Party Has Fallen ⚰️",
+    message_title_classes="text-h5 text-center text-red-300 mb-4",
+    message="The adventure has ended in tragedy. Perhaps another band of heroes will take up the quest...",
+    heroes="💀 Fallen Heroes",
+    heroes_classes="text-h6 mb-4 text-red-400 text-center",
+    scene_suffix="The End",
+)
+
+
+def render_game_ending(
+    main_container, scene, game_state, scene_index, render_scene_callback, *, won: bool
 ):
-    """Render the victory screen when the quest is completed."""
+    """Render the final screen: victory if the quest succeeded, otherwise defeat."""
+    ending = _VICTORY if won else _DEFEAT
     main_container.clear()
 
     # Get scenario name from template
@@ -70,23 +114,19 @@ def render_game_completed(
     scenario_name = scenario.name if scenario else "Unknown Quest"
 
     with main_container:
-        # Victory banner
-        with ui.card().classes(
-            "fantasy-panel w-full max-w-4xl border-4 border-yellow-500 shadow-2xl"
-        ):
+        # Ending banner
+        with ui.card().classes(ending.panel):
             # Scenario title
             ui.label(f"📜 {scenario_name}").classes(
                 "text-h4 mb-2 fantasy-text-gold text-center"
             )
             ui.html('<div class="ornate-divider"></div>')
 
-            # Victory title
-            ui.label("🏆 QUEST COMPLETED! 🏆").classes(
-                "text-h3 mb-4 text-yellow-400 text-center font-bold"
-            )
+            # Ending title
+            ui.label(ending.title).classes(ending.title_classes)
 
             # Final scene narrative
-            ui.label(f"⚔️ Scene {scene.id} - The Conclusion").classes(
+            ui.label(f"⚔️ Scene {scene.id} - {ending.scene_suffix}").classes(
                 "text-h5 mb-4 fantasy-text-gold"
             )
             ui.markdown(scene.text).classes("markdown w-full text-left mb-6")
@@ -113,14 +153,10 @@ def render_game_completed(
         # Scene navigation buttons
         render_scene_navigation(game_state, scene_index, render_scene_callback)
 
-        # Victory message
-        with ui.card().classes("fantasy-panel w-full max-w-4xl bg-yellow-900/20"):
-            ui.label("✨ The Adventure Concludes in Glory! ✨").classes(
-                "text-h5 text-center text-yellow-300 mb-4"
-            )
-            ui.label(
-                "Your party has successfully completed their quest. Their names will be remembered in legend!"
-            ).classes("text-center text-lg mb-4")
+        # Ending message
+        with ui.card().classes(ending.message_panel):
+            ui.label(ending.message_title).classes(ending.message_title_classes)
+            ui.label(ending.message).classes("text-center text-lg mb-4")
 
             ui.button(
                 "🏠 Return to Main Menu", on_click=lambda: ui.navigate.to("/")
@@ -129,85 +165,7 @@ def render_game_completed(
         # Final party status
         if game_state and game_state.characters:
             ui.html('<div class="ornate-divider"></div>')
-            ui.label("👥 Victorious Heroes").classes(
-                "text-h6 mb-4 fantasy-text-gold text-center"
-            )
-            render_character_cards(game_state.characters, game_state.id)
-
-
-def render_game_failed(
-    main_container, scene, game_state, scene_index, render_scene_callback
-):
-    """Render the game over screen when the party is defeated."""
-    main_container.clear()
-
-    # Get scenario name from template
-    scenario = game_flow.get_scenario_for_game(game_state.id)
-    scenario_name = scenario.name if scenario else "Unknown Quest"
-
-    with main_container:
-        # Defeat banner
-        with ui.card().classes(
-            "fantasy-panel w-full max-w-4xl border-4 border-red-500 shadow-2xl"
-        ):
-            # Scenario title
-            ui.label(f"📜 {scenario_name}").classes(
-                "text-h4 mb-2 fantasy-text-gold text-center"
-            )
-            ui.html('<div class="ornate-divider"></div>')
-
-            # Game over title
-            ui.label("💀 GAME OVER 💀").classes(
-                "text-h3 mb-4 text-red-400 text-center font-bold"
-            )
-
-            # Final scene narrative
-            ui.label(f"⚔️ Scene {scene.id} - The End").classes(
-                "text-h5 mb-4 fantasy-text-gold"
-            )
-            ui.markdown(scene.text).classes("markdown w-full text-left mb-6")
-
-            # Voice-over if available
-            if scene.voiceover_path:
-                ui.html('<div class="ornate-divider"></div>')
-                with ui.row().classes(
-                    "items-center gap-3 mb-4 p-3 rounded-lg bg-gray-800/50"
-                ):
-                    ui.icon("volume_up", size="lg").classes("text-yellow-500")
-                    ui.label("Final Narration:").classes(
-                        "text-sm fantasy-text-gold font-semibold"
-                    )
-                    ui.audio(scene.voiceover_path).classes("flex-grow")
-                ui.html('<div class="ornate-divider"></div>')
-
-        # Display scene image if available
-        if scene.image_path:
-            ui.image(scene.image_path).classes(
-                "w-full max-w-3xl rounded-lg shadow-lg mb-6"
-            )
-
-        # Scene navigation buttons
-        render_scene_navigation(game_state, scene_index, render_scene_callback)
-
-        # Defeat message
-        with ui.card().classes("fantasy-panel w-full max-w-4xl bg-red-900/20"):
-            ui.label("⚰️ The Party Has Fallen ⚰️").classes(
-                "text-h5 text-center text-red-300 mb-4"
-            )
-            ui.label(
-                "The adventure has ended in tragedy. Perhaps another band of heroes will take up the quest..."
-            ).classes("text-center text-lg mb-4")
-
-            ui.button(
-                "🏠 Return to Main Menu", on_click=lambda: ui.navigate.to("/")
-            ).classes("mx-auto")
-
-        # Final party status (fallen heroes)
-        if game_state and game_state.characters:
-            ui.html('<div class="ornate-divider"></div>')
-            ui.label("💀 Fallen Heroes").classes(
-                "text-h6 mb-4 text-red-400 text-center"
-            )
+            ui.label(ending.heroes).classes(ending.heroes_classes)
             render_character_cards(game_state.characters, game_state.id)
 
 
@@ -239,14 +197,14 @@ async def start_adventure(main_container, game_id: str):
 
         # Check if game has ended (victory or defeat)
         game_status = getattr(scene, "game_status", "ongoing")
-        if game_status == "completed":
-            render_game_completed(
-                main_container, scene, game_state, scene_index, render_scene
-            )
-            return
-        elif game_status == "failed":
-            render_game_failed(
-                main_container, scene, game_state, scene_index, render_scene
+        if game_status in ("completed", "failed"):
+            render_game_ending(
+                main_container,
+                scene,
+                game_state,
+                scene_index,
+                render_scene,
+                won=game_status == "completed",
             )
             return
 
