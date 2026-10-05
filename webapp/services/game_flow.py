@@ -1,7 +1,7 @@
 """Service layer orchestrating game and generation logic for the UI components.
 
 Purpose:
-- Provide thin async wrappers around core.generator and core.game functions
+- Provide thin async wrappers around core.generation and core.game functions
   so UI components depend on this service instead of core modules directly.
 - Offer helper accessors for game state.
 """
@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pathlib
 
-from core import game, generator, persistence, prompts
+from core import game, persistence, prompts
+from core.generation import characters, scenarios
 from core.models import (
     Character,
     Game,
@@ -51,7 +52,7 @@ async def generate_new_scenario(
     existing_scenarios = persistence.load_all_scenario_templates()
 
     # Generate new scenario
-    new_scenario = await generator.generate_scenario_template(
+    new_scenario = await scenarios.generate_scenario_template(
         existing_scenarios, theme=theme, scale=scale, avoid_names=_used_names()
     )
 
@@ -100,7 +101,7 @@ async def generate_characters(
     num_characters: int,
     scenario_details: str | None = None,
 ) -> list[Character]:
-    return await generator.generate_characters(
+    return await characters.generate_characters(
         game_id=game_id,
         scenario_name=scenario_name,
         num_characters=num_characters,
@@ -147,7 +148,7 @@ async def generate_archetypes(
     scale: str = "any",
 ) -> list[GeneratedArchetype]:
     """Generate scenario-tailored hero archetypes for players to pick from."""
-    return await generator.generate_archetypes(
+    return await characters.generate_archetypes(
         scenario_name=scenario_name,
         scenario_details=scenario_details,
         num_archetypes=num_archetypes,
@@ -184,7 +185,7 @@ async def generate_hero(
     scale: str = "any",
 ) -> Character:
     """Generate a single hero (lore + portrait) from a chosen archetype."""
-    return await generator.generate_hero(
+    return await characters.generate_hero(
         game_id=game_id,
         scenario_name=scenario_name,
         scenario_details=scenario_details,

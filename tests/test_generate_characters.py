@@ -2,7 +2,7 @@
 
 from pydantic_ai.messages import ModelResponse, TextPart
 
-from core import generator
+from core.generation import characters
 from core.models import GeneratedCharacter, GeneratedCharacterList
 
 
@@ -33,11 +33,11 @@ async def test_one_failed_portrait_does_not_sink_the_party(
         path.write_bytes(b"png")
         return concept.name, path
 
-    monkeypatch.setattr(generator, "IMAGE_DIR", tmp_path)
-    monkeypatch.setattr(generator, "shared_image_generator", lambda: object())
-    monkeypatch.setattr(generator, "generate_character_image_sync", render)
+    monkeypatch.setattr(characters, "IMAGE_DIR", tmp_path)
+    monkeypatch.setattr(characters, "shared_image_generator", lambda: object())
+    monkeypatch.setattr(characters, "generate_character_image_sync", render)
 
-    party = await generator.generate_characters(
+    party = await characters.generate_characters(
         "g1", "The Frozen Pass", num_characters=2
     )
 

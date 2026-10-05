@@ -17,6 +17,9 @@ from .components.resume import resume_game
 # Component imports (UI flow steps)
 from .components.scenarios import show_scenarios
 
+# Show INFO logs from the game modules alongside Uvicorn's own output. (This used
+# to happen as a side effect of importing core.generator.)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI()

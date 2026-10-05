@@ -7,7 +7,7 @@ import json
 
 from pydantic_ai.messages import ModelResponse, TextPart
 
-from core import generator
+from core.generation.recap import generate_scene_recap
 from core.models import Scene
 
 SCENES = [
@@ -18,7 +18,7 @@ SCENES = [
 
 
 async def _recap(characters, current_scene_index=1):
-    return await generator.generate_scene_recap(
+    return await generate_scene_recap(
         game_id="g1",
         scenario_name="The Frozen Pass",
         scenes=SCENES,

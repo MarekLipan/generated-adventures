@@ -4,7 +4,8 @@ import logging
 
 from nicegui import ui
 
-from core import generator, media, models
+from core import media, models
+from core.generation.recap import generate_scene_recap
 from webapp.services import game_flow
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ async def show_recap_dialog(game_state: models.Game, current_scene_index: int):
 
         try:
             # Generate recap with scene summaries
-            recap_response = await generator.generate_scene_recap(
+            recap_response = await generate_scene_recap(
                 game_id=game_state.id,
                 scenario_name=scenario_name,
                 scenes=game_state.scenes,

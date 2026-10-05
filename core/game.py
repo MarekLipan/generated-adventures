@@ -3,12 +3,13 @@ Core game state management.
 This module is UI-agnostic.
 
 It manages an in-memory mapping of games and exposes helpers to advance the
-scene-based story by calling the generator.
+scene-based story by calling the generation steps.
 """
 
 from datetime import datetime
 
-from . import generator, persistence
+from . import persistence
+from .generation import scenarios, scenes
 from .models import Asset, Character, Game, ScenarioTemplate, Scene
 
 # In-memory storage for active games, mapping game_id to a Game object.
@@ -114,7 +115,7 @@ async def generate_opening_scene(game_id: str):
 
     # Generate initial locations for the adventure if not already done
     if not game.locations:
-        game.locations = await generator.generate_initial_locations(
+        game.locations = await scenarios.generate_initial_locations(
             scenario.name,
             scenario.dm_notes,
         )
@@ -125,7 +126,7 @@ async def generate_opening_scene(game_id: str):
         updated_characters,
         updated_assets,
         updated_locations,
-    ) = await generator.generate_opening_scene(
+    ) = await scenes.generate_opening_scene(
         game_id,
         scenario.name,
         scenario.dm_notes,
@@ -205,7 +206,7 @@ async def advance_scene(game_id: str, player_action: str | None) -> Scene | None
         updated_characters,
         updated_assets,
         updated_locations,
-    ) = await generator.generate_next_scene(
+    ) = await scenes.generate_next_scene(
         game_id=game_id,
         scenario_name=scenario.name,
         scenario_details=scenario.dm_notes,
