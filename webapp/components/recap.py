@@ -4,8 +4,7 @@ import logging
 
 from nicegui import ui
 
-from core import media, models
-from core.generation.recap import generate_scene_recap
+from core import models
 from webapp.services import game_flow
 
 logger = logging.getLogger(__name__)
@@ -40,7 +39,7 @@ async def show_recap_dialog(game_state: models.Game, current_scene_index: int):
 
         try:
             # Generate recap with scene summaries
-            recap_response = await generate_scene_recap(
+            recap_response = await game_flow.generate_scene_recap(
                 game_id=game_state.id,
                 scenario_name=scenario_name,
                 scenes=game_state.scenes,
@@ -60,7 +59,7 @@ async def show_recap_dialog(game_state: models.Game, current_scene_index: int):
 
             # Generate recap voiceover via the configured TTS backend (Kokoro local
             # by default). File is saved temporarily but not tracked in game state.
-            voiceover_file_path = await media.generate_recap_voiceover(
+            voiceover_file_path = await game_flow.generate_recap_voiceover(
                 game_state.id, current_scene.id, recap_text
             )
 

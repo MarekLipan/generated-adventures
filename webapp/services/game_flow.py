@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import pathlib
 
-from core import game, persistence, prompts
-from core.generation import characters, scenarios
+from core import game, media, persistence, prompts
+from core.generation import characters, recap, scenarios
 from core.models import (
     Character,
     Game,
     GeneratedArchetype,
+    RecapResponse,
     ScenarioTemplate,
     Scene,
 )
@@ -222,3 +223,27 @@ def load_game(game_id: str) -> Game | None:
 def list_saved_games() -> list[tuple[str, str, str]]:
     """Return list of (game_id, scenario_name, summary) for all saved games."""
     return persistence.list_saved_games()
+
+
+async def generate_scene_recap(
+    game_id: str,
+    scenario_name: str,
+    scenes: list[Scene],
+    characters: list[Character],
+    current_scene_index: int,
+) -> RecapResponse:
+    """Recap the adventure up to the current scene for returning players."""
+    return await recap.generate_scene_recap(
+        game_id=game_id,
+        scenario_name=scenario_name,
+        scenes=scenes,
+        characters=characters,
+        current_scene_index=current_scene_index,
+    )
+
+
+async def generate_recap_voiceover(
+    game_id: str, scene_id: int, recap_text: str
+) -> pathlib.Path | None:
+    """Narrate a recap; returns the audio file, or None if narration is unavailable."""
+    return await media.generate_recap_voiceover(game_id, scene_id, recap_text)
