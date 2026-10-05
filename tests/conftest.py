@@ -4,7 +4,7 @@ import pytest
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.profiles import ModelProfile
 
-from core import generator
+from core import llm
 from core.models import Character
 
 
@@ -48,7 +48,7 @@ def fake_llm(monkeypatch):
         model = FunctionModel(
             fn, profile=ModelProfile(supports_json_schema_output=True)
         )
-        monkeypatch.setattr(generator, "_get_text_model", lambda: model)
+        monkeypatch.setattr(llm, "get_text_model", lambda: model)
         return prompts
 
     return install

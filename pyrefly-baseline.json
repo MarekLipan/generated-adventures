@@ -8,13 +8,6 @@
       "severity": "error"
     },
     {
-      "column": 65,
-      "path": "core/generator.py",
-      "name": "not-a-type",
-      "concise_description": "Expected a type form, got instance of `(iterable: Iterable[object], /) -> bool`",
-      "severity": "error"
-    },
-    {
       "column": 32,
       "path": "core/generator.py",
       "name": "bad-function-definition",
@@ -215,6 +208,13 @@
       "path": "core/image_backends.py",
       "name": "not-callable",
       "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 65,
+      "path": "core/llm.py",
+      "name": "not-a-type",
+      "concise_description": "Expected a type form, got instance of `(iterable: Iterable[object], /) -> bool`",
       "severity": "error"
     },
     {

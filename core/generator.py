@@ -10,17 +10,12 @@ import logging
 import pathlib
 import re
 import threading
-from collections.abc import Callable
-
-from google.genai.errors import ClientError, ServerError
-from pydantic_ai import Agent, NativeOutput
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.providers.google import GoogleProvider
 
 from . import voice_casting
 from .character_updates import apply_character_updates, format_inventory
 from .config import settings
 from .image_backends import ImageGenerator, get_image_generator
+from .llm import retry_on_overload, text_agent
 from .models import (
     Asset,
     Character,
@@ -93,48 +88,6 @@ def warm_up_models() -> None:
         logger.warning(f"TTS warmup failed (will retry on first use): {e}")
 
 
-def _get_text_model():
-    """Build the pydantic-ai text model for the configured LLM_PROVIDER.
-
-    - "gemini": Google Gemini (GoogleModel + GoogleProvider), model LLM_MODEL.
-    - "ollama"/"openai-compatible": any OpenAI-compatible endpoint via LLM_BASE_URL.
-
-    Centralizing this lets every generation call switch providers from config with
-    no code change, and keeps the model id (e.g. gemini-3.1-flash-lite) in one place.
-    """
-    provider = settings.LLM_PROVIDER.lower()
-    if provider == "gemini":
-        return GoogleModel(
-            settings.LLM_MODEL,
-            provider=GoogleProvider(api_key=settings.GOOGLE_API_KEY),
-        )
-
-    # OpenAI-compatible local servers (Ollama, llama.cpp, LM Studio).
-    from pydantic_ai.models.openai import OpenAIModel
-    from pydantic_ai.providers.openai import OpenAIProvider
-
-    return OpenAIModel(
-        settings.LLM_MODEL,
-        provider=OpenAIProvider(
-            base_url=settings.LLM_BASE_URL, api_key=settings.LLM_API_KEY
-        ),
-    )
-
-
-def _text_agent(output_type):
-    """Build a text Agent using the configured model with NATIVE structured output.
-
-    We use NativeOutput (the provider's native JSON-schema response) instead of
-    the default tool-calling output. Gemini 3 requires an encrypted
-    `thought_signature` to be echoed back on any function-call turn; pydantic-ai's
-    validation-retry re-sends the structured-output tool call without it, which
-    Gemini rejects with a 400 ("missing thought_signature in functionCall parts").
-    Native JSON output produces no function-call parts, so it sidesteps the issue
-    entirely — and works the same way for the local OpenAI-compatible backends.
-    """
-    return Agent(model=_get_text_model(), output_type=NativeOutput(output_type))
-
-
 # Lazy TTS generator singleton. `_UNSET` distinguishes "not built yet" from a
 # cached None (TTS disabled or failed to initialize — narration is optional, so
 # we don't retry every scene).
@@ -156,61 +109,6 @@ def _get_tts_generator() -> TTSGenerator | None:
 
 VOICEOVER_DIR = pathlib.Path("webapp/static/voiceovers")
 VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# Retry configuration for API calls
-MAX_RETRIES = 5
-RETRY_DELAY = 3  # seconds
-RETRY_BACKOFF = 2  # exponential backoff multiplier
-
-
-async def retry_on_overload(func: Callable, *args, **kwargs) -> any:
-    """Retry async function calls when the API is overloaded.
-
-    Retries on 503 (Service Unavailable) and 429 (Too Many Requests) errors
-    with exponential backoff.
-    """
-    last_exception = None
-    delay = RETRY_DELAY
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            return await func(*args, **kwargs)
-        except (ServerError, ClientError) as e:
-            last_exception = e
-            # Check if it's a retryable error (503, 429, or 500)
-            if hasattr(e, "status_code"):
-                status_code = e.status_code
-            elif hasattr(e, "code"):
-                status_code = e.code
-            else:
-                # Unknown error format, don't retry
-                raise
-
-            if status_code in (503, 429, 500):
-                if attempt < MAX_RETRIES - 1:
-                    logger.warning(
-                        f"API error {status_code} on attempt {attempt + 1}/{MAX_RETRIES}. "
-                        f"Retrying in {delay} seconds..."
-                    )
-                    await asyncio.sleep(delay)
-                    delay *= RETRY_BACKOFF  # exponential backoff
-                else:
-                    logger.error(
-                        f"API error {status_code} after {MAX_RETRIES} attempts. Giving up."
-                    )
-                    raise
-            else:
-                # Non-retryable error (e.g., 400 Bad Request)
-                raise
-        except Exception as e:
-            # Unexpected error, don't retry
-            logger.error(f"Unexpected error during API call: {type(e).__name__}: {e}")
-            raise
-
-    # Should never reach here, but just in case
-    if last_exception:
-        raise last_exception
 
 
 def _generate_character_image_sync(
@@ -588,7 +486,7 @@ async def generate_characters(
     # Step 1: Generate character concepts (name, stats)
 
     logger.info(f"Generating {num_characters} characters for scenario: {scenario_name}")
-    agent = _text_agent(GeneratedCharacterList)
+    agent = text_agent(GeneratedCharacterList)
 
     # Build context-aware prompt
     context_section = ""
@@ -724,7 +622,7 @@ async def generate_archetypes(
     logger.info(
         f"Generating {num_archetypes} archetypes for scenario: {scenario_name} (scale={scale})"
     )
-    agent = _text_agent(GeneratedArchetypeList)
+    agent = text_agent(GeneratedArchetypeList)
 
     # Only the non-spoiler SETTING reaches this player-facing generation — never
     # the plot, quest, villains or secrets from the DM notes.
@@ -886,7 +784,7 @@ async def _generate_hero_lore(
     scale: str = "any",
 ) -> GeneratedCharacter:
     """Generate stats + lore for a single hero fitted to scenario and archetype."""
-    agent = _text_agent(GeneratedCharacter)
+    agent = text_agent(GeneratedCharacter)
 
     context_section = ""
     # Only the non-spoiler setting reaches hero lore — the backstory is shown to the
@@ -1222,7 +1120,7 @@ async def generate_scenario_template(
     Returns:
         ScenarioTemplate object with name, one_liner, and full DM notes
     """
-    agent = _text_agent(GeneratedScenarioTemplate)
+    agent = text_agent(GeneratedScenarioTemplate)
 
     theme_key = theme if theme in SCENARIO_THEMES else "any"
     _label, theme_steering = SCENARIO_THEMES[theme_key]
@@ -1400,7 +1298,7 @@ async def generate_initial_locations(
     Returns:
         Dictionary mapping location IDs to Location objects
     """
-    agent = _text_agent(GeneratedLocationList)
+    agent = text_agent(GeneratedLocationList)
 
     logger.info(f"Generating initial locations for scenario: {scenario_name}")
 
@@ -2305,7 +2203,7 @@ async def generate_opening_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    agent = _text_agent(GeneratedScene)
+    agent = text_agent(GeneratedScene)
 
     logger.info(f"Generating opening scene for: {scenario_name}")
 
@@ -2523,7 +2421,7 @@ async def generate_next_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    agent = _text_agent(GeneratedScene)
+    agent = text_agent(GeneratedScene)
 
     next_id = last_scene_id + 1
     logger.info(f"Generating scene {next_id} for: {scenario_name}")
@@ -2765,7 +2663,7 @@ async def generate_scene_recap(
     Returns:
         RecapResponse containing overall recap text and individual scene summaries
     """
-    agent = _text_agent(RecapResponse)
+    agent = text_agent(RecapResponse)
 
     logger.info(
         f"Generating recap for game {game_id}, scenes 1-{current_scene_index + 1}"
