@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # - "flux-klein":      FREE, fully local. FLUX.2 Klein [9B or 4B]. Native list of
     #                      reference images — no stitching. 9B distilled runs in 4 steps.
     # - "gemini":          Cloud API (requires GOOGLE_API_KEY).
-    # - "http":            Remote inference service (this app's image_server.py) that
+    # - "http":            Local image server (this app's image_server.py) that
     #                      keeps a model warm and runs generation over HTTP. The game
     #                      becomes a thin client — see IMAGE_SERVER_URL below.
     IMAGE_PROVIDER: Literal["flux-klein", "gemini", "http"] = "flux-klein"
@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     FLUX_KLEIN_MPS_PORTRAIT_WIDTH: int = 576
     FLUX_KLEIN_MPS_PORTRAIT_HEIGHT: int = 768
 
-    # ── Remote inference service (image_server.py) ──────────────────────────────
+    # ── Local image server (image_server.py) ──────────────────────────────────
     # The server loads the local backend (flux-klein) once, keeps it warm,
     # and serves generation over HTTP. Run it with:
     #     uv run adventures-image-server

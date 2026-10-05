@@ -108,7 +108,7 @@ select = [
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI declares request parameters through call defaults by design.
-extend-immutable-calls = ["fastapi.File"]
+extend-immutable-calls = ["fastapi.File", "fastapi.Form"]
 
 [tool.pyrefly]
 project-includes = ["src", "tests", "scripts"]

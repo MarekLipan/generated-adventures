@@ -123,7 +123,7 @@ src/generated_adventures/
   core/              game engine: state, generation, prompts, media, model backends
     generation/      LLM steps: scenarios, characters, scenes, recap
   webapp/            NiceGUI UI and the service layer it calls
-  image_server.py    optional remote image service
+  image_server.py    optional local image server
 tests/
 scripts/             benchmark_images.py
 docs/

@@ -157,3 +157,91 @@ def test_missing_reference_files_are_skipped(http, tmp_path):
     )
 
     assert calls[0]["fields"] == []
+
+
+def test_http_scene_sends_directions_aligned_with_references(http, photo, tmp_path):
+    backend, calls = http
+
+    backend.generate_scene_image(
+        "A battle",
+        tmp_path / "scene.png",
+        reference_images=[photo, tmp_path / "gone.png", photo],
+        subject_directions=["Elara raises a lantern", "Ghost", ""],
+    )
+
+    # The missing reference takes its direction with it; positions stay matched.
+    assert calls[0]["fields"] == ["references", "references"]
+    assert calls[0]["data"]["subject_directions"] == ["Elara raises a lantern", ""]
+
+
+# --- HTTP client against the real image server ---------------------------------
+
+
+@pytest.fixture
+def image_server(monkeypatch):
+    """The real image server app, with a fake GPU backend that records its calls."""
+    from fastapi.testclient import TestClient
+
+    from generated_adventures import image_server
+
+    calls = []
+
+    class FakeBackend:
+        def generate_character_image(
+            self, prompt, out, reference_images=None, art_style=None
+        ):
+            out.write_bytes(_png())
+            return out
+
+        def generate_scene_image(
+            self,
+            prompt,
+            out,
+            reference_images=None,
+            art_style=None,
+            subject_directions=None,
+        ):
+            refs = [p.read_bytes() for p in reference_images or []]
+            calls.append({"refs": refs, "directions": subject_directions})
+            out.write_bytes(_png())
+            return out
+
+    monkeypatch.setattr(image_server, "_local_backend_for_server", FakeBackend)
+    with TestClient(image_server.app, base_url="http://image-server") as client:
+        backend = HttpImageGenerator("http://image-server")
+        # The in-process client has no network timeout to configure.
+        post = lambda url, timeout=None, **kw: client.post(url, **kw)  # noqa: E731
+        monkeypatch.setattr(backend, "_httpx", SimpleNamespace(post=post))
+        yield backend, calls
+
+
+def test_directions_reach_the_server_backend(image_server, tmp_path):
+    backend, calls = image_server
+    elara, gareth = tmp_path / "elara.png", tmp_path / "gareth.png"
+    elara.write_bytes(_png() + b"elara")
+    gareth.write_bytes(_png() + b"gareth")
+    out = tmp_path / "scene.png"
+
+    result = backend.generate_scene_image(
+        "A battle",
+        out,
+        reference_images=[elara, gareth],
+        subject_directions=["Elara raises a lantern", ""],
+    )
+
+    assert result == out and out.exists()
+    (call,) = calls
+    assert call["refs"] == [elara.read_bytes(), gareth.read_bytes()]
+    assert call["directions"] == ["Elara raises a lantern", ""]
+
+
+def test_scene_without_directions_reaches_the_server(image_server, tmp_path):
+    backend, calls = image_server
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(_png())
+
+    backend.generate_scene_image(
+        "A battle", tmp_path / "scene.png", reference_images=[ref]
+    )
+
+    assert calls[0]["directions"] is None

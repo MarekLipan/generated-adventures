@@ -1003,7 +1003,7 @@ class FluxKleinImageGenerator(ImageGenerator):
 
 
 class HttpImageGenerator(ImageGenerator):
-    """Client backend that offloads generation to a remote image server.
+    """Client backend that offloads generation to the local image server.
 
     Talks to image_server.py (which hosts a warm local backend) over HTTP, so the
     game process holds no model and no GPU. The server may run on this machine
@@ -1018,7 +1018,7 @@ class HttpImageGenerator(ImageGenerator):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.headers = {"X-API-Key": api_key} if api_key else {}
-        logger.info(f"Using remote image server at {self.base_url}")
+        logger.info(f"Using image server at {self.base_url}")
 
     def _post(self, path: str, *, data: dict, files=None) -> bytes | None:
         try:
@@ -1047,16 +1047,24 @@ class HttpImageGenerator(ImageGenerator):
         output_path: pathlib.Path,
         references: list[pathlib.Path],
         art_style: str | None,
+        directions: list[str] | None = None,
     ) -> pathlib.Path | None:
-        """POST the prompt with reference images as `field`; save the returned PNG."""
-        data = {"prompt": prompt}
+        """POST the prompt with reference images as `field`; save the returned PNG.
+
+        `directions`, if given, holds one entry per reference (who that subject is
+        and what they're doing) and is sent alongside them in the same order.
+        """
+        data: dict[str, str | list[str]] = {"prompt": prompt}
         if art_style:
             data["art_style"] = art_style
+        if directions is not None and len(directions) != len(references):
+            directions = None  # can't be matched to the references
 
         files = []
+        sent_directions = []
         open_handles = []
         try:
-            for ref in references:
+            for i, ref in enumerate(references):
                 ref = pathlib.Path(ref)
                 if not ref.exists():
                     logger.warning(f"Reference image not found, skipping: {ref}")
@@ -1064,6 +1072,10 @@ class HttpImageGenerator(ImageGenerator):
                 fh = ref.open("rb")
                 open_handles.append(fh)
                 files.append((field, (ref.name, fh, "image/png")))
+                if directions is not None:
+                    sent_directions.append(directions[i])
+            if any(sent_directions):
+                data["subject_directions"] = sent_directions
 
             png = self._post(endpoint, data=data, files=files or None)
         finally:
@@ -1108,6 +1120,7 @@ class HttpImageGenerator(ImageGenerator):
             output_path,
             reference_images or [],
             art_style,
+            subject_directions,
         )
 
 

@@ -1,4 +1,4 @@
-# Image Inference Server
+# Local image server
 
 Runs the image model (FLUX.2 Klein) as a standalone HTTP service
 that loads the model **once**, keeps it warm on the GPU, and serves generation on
@@ -10,8 +10,8 @@ device on the same network can use the same endpoint.
 - **Warm model.** No ~50 s reload per generation; the model stays resident.
 - **Crash isolation.** If the GPU path crashes, the server restarts on its own
   without taking the game down.
-- **Shared + remote.** Your game and, say, your laptop on the same wifi can both
-  call it.
+- **Shared on your network.** The game on this machine and, say, on your laptop
+  over the same wifi can both use it.
 
 ## Running the server
 

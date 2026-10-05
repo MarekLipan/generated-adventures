@@ -37,7 +37,7 @@ flowchart TD
     Flow --> Game
     Flow --> Gen
     LLM --> TextAPI[("Gemini API or an<br/>OpenAI-compatible server")]
-    Img -.->|IMAGE_PROVIDER=http| Server["image_server<br/>on a machine with a GPU"]
+    Img -.->|IMAGE_PROVIDER=http| Server["image_server<br/>local image server"]
     Store --> Saves[("data/games")]
     Media --> Files[("data/media")]
 ```
@@ -92,7 +92,7 @@ All code lives in `src/generated_adventures/`.
 | `core/image_backends.py` | FLUX.2 Klein (CUDA and Apple Silicon paths), Gemini, and the HTTP client for `image_server`. |
 | `core/tts_backends.py`, `core/voice_casting.py` | Kokoro and Gemini narration; a consistent voice per character. |
 | `core/persistence.py`, `core/models.py`, `core/config.py` | JSON saves, the pydantic data models, and settings from `.env`. |
-| `image_server.py` | Optional HTTP service that keeps the image model loaded on a GPU machine. |
+| `image_server.py` | Optional local image server that keeps the image model loaded, on this machine or another one on your network. |
 
 ## Rules
 

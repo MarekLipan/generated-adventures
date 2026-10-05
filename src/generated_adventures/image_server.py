@@ -138,25 +138,39 @@ async def generate_scene(
     prompt: str = Form(...),
     art_style: str | None = Form(default=None),
     references: list[UploadFile] = File(default=[]),
+    subject_directions: list[str] = Form(default=[]),
     x_api_key: str | None = Header(default=None),
 ):
     _check_api_key(x_api_key)
     gen = STATE["generator"]
 
+    # One direction per reference, in the same order ("" when a subject has
+    # none). Anything else can't be matched up, so it is ignored.
+    references = references or []
+    if len(subject_directions) != len(references):
+        subject_directions = []
+
     # Persist uploaded reference images to a temp dir; the backend takes file paths.
     with tempfile.TemporaryDirectory() as td:
         ref_paths: list[Path] = []
-        for i, uf in enumerate(references or []):
+        directions: list[str] = []
+        for i, uf in enumerate(references):
             data = await uf.read()
             if not data:
                 continue
             p = Path(td) / f"ref_{i}_{Path(uf.filename or 'ref').name}"
             p.write_bytes(data)
             ref_paths.append(p)
+            if subject_directions:
+                directions.append(subject_directions[i])
 
         png = await _run_generation(
             lambda out: gen.generate_scene_image(
-                prompt, out, reference_images=ref_paths or None, art_style=art_style
+                prompt,
+                out,
+                reference_images=ref_paths or None,
+                art_style=art_style,
+                subject_directions=directions or None,
             )
         )
     return Response(content=png, media_type="image/png")
