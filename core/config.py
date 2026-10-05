@@ -135,6 +135,21 @@ class Settings(BaseSettings):
     # (party heroes, then NPCs, then objects), so objects and bit-part extras are
     # dropped past this cap rather than dragging every character down to a thumbnail.
     IMAGE_MAX_SCENE_REFERENCES: int = 3
+
+    # ── Per-subject scene compositing (multi-character consistency) ─────────────
+    # With 2+ reference portraits in one render, FLUX conditions on them globally
+    # and their looks bleed into each other (enemies wearing the hero's clothes).
+    # When enabled, multi-subject scenes are rendered in passes instead:
+    #   1. a base scene render (composition, lighting, everyone roughly in place),
+    #   2. then each subject's own region is re-rendered (masked inpaint) using
+    #      ONLY that subject's reference portrait, so no cross-bleed is possible.
+    # Costs one extra pass per subject (slower), but characters stay themselves.
+    # Single-reference scenes skip this entirely — there is nothing to bleed.
+    IMAGE_SCENE_COMPOSITE: bool = True
+    # How much of each subject's region is repainted (0..1). Lower keeps more of the
+    # base render's pose/lighting (better blending), higher enforces the reference
+    # more strongly (better likeness). 0.75 is a balanced starting point.
+    IMAGE_COMPOSITE_STRENGTH: float = 0.75
     # MPS has no flash-attention kernel, so the full attention matrix is
     # materialized in one allocation. With a multi-character party, 1024px
     # references OOM a 32 GB Mac (a single ~30 GB MTLBuffer); 512px fits with
