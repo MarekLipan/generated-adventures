@@ -337,35 +337,7 @@
       "severity": "error"
     },
     {
-      "column": 74,
-      "path": "src/generated_adventures/webapp/utils/pdf_generator.py",
-      "name": "bad-function-definition",
-      "concise_description": "Default `None` is not assignable to parameter `game_id` with type `str`",
-      "severity": "error"
-    },
-    {
-      "column": 67,
-      "path": "src/generated_adventures/webapp/utils/pdf_generator.py",
-      "name": "bad-function-definition",
-      "concise_description": "Default `None` is not assignable to parameter `game_id` with type `str`",
-      "severity": "error"
-    },
-    {
       "column": 18,
-      "path": "src/generated_adventures/webapp/utils/pdf_generator.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
-      "severity": "error"
-    },
-    {
-      "column": 30,
-      "path": "src/generated_adventures/webapp/utils/pdf_generator.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Image` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
-      "severity": "error"
-    },
-    {
-      "column": 30,
       "path": "src/generated_adventures/webapp/utils/pdf_generator.py",
       "name": "bad-argument-type",
       "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",

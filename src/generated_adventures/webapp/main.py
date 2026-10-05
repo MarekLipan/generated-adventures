@@ -129,11 +129,7 @@ def main_page():
         with ui.dialog() as dialog, ui.card().classes("fantasy-panel"):
             ui.label("📜 Select a Quest to Resume").classes("text-h5 mb-4")
 
-            selected_game_id = None
-
             def select_game(game_id: str):
-                nonlocal selected_game_id
-                selected_game_id = game_id
                 dialog.submit(game_id)
 
             for game_id, scenario_name, summary in saved_games:

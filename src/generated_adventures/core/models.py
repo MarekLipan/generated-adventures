@@ -441,15 +441,6 @@ class NarrationSegment(BaseModel):
     )
 
 
-class NarrationScript(BaseModel):
-    """An ordered breakdown of a scene into voiced narration segments."""
-
-    segments: list[NarrationSegment] = Field(
-        ...,
-        description="The scene split into ordered segments, alternating between Narrator prose and character dialogue, covering the whole scene in reading order.",
-    )
-
-
 class GeneratedArchetype(BaseModel):
     """A scenario-tailored hero archetype offered to a player to pick from.
 
@@ -518,12 +509,6 @@ class GeneratedCharacter(BaseModel):
         "obviously-useful items (a weapon, a tool tied to a skill, one situational item) over "
         "flavorful-but-opaque trinkets.",
     )
-
-
-class GeneratedCharacterList(BaseModel):
-    """Represents a list of generated characters."""
-
-    characters: list[GeneratedCharacter]
 
 
 class GeneratedLocation(BaseModel):

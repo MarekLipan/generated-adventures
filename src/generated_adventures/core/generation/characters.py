@@ -7,7 +7,6 @@ import pathlib
 from ..llm import retry_on_overload, text_agent
 from ..media import (
     IMAGE_DIR,
-    generate_character_image_sync,
     generate_hero_portrait_sync,
     shared_image_generator,
 )
@@ -16,7 +15,6 @@ from ..models import (
     GeneratedArchetype,
     GeneratedArchetypeList,
     GeneratedCharacter,
-    GeneratedCharacterList,
 )
 from ..prompts import (
     SCENARIO_SCALES,
@@ -25,120 +23,6 @@ from ..prompts import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def generate_characters(
-    game_id: str,
-    scenario_name: str,
-    num_characters: int = 6,
-    scenario_details: str | None = None,
-) -> list[Character]:
-    """Generates a list of characters with stats and portraits for a given scenario.
-
-    Args:
-        game_id: Unique identifier for the game (used for image storage)
-        scenario_name: Name of the scenario
-        num_characters: Number of characters to generate
-        scenario_details: Optional markdown details about the scenario (setting, plot, NPCs, etc.)
-    """
-    # Step 1: Generate character concepts (name, stats)
-
-    logger.info(f"Generating {num_characters} characters for scenario: {scenario_name}")
-    agent = text_agent(GeneratedCharacterList)
-
-    # Build context-aware prompt
-    context_section = ""
-    if scenario_details:
-        context_section = f"""
-SCENARIO CONTEXT:
-{scenario_details}
-
-Use the above scenario details to inform your character creation. Characters should fit naturally into this world, 
-relate to the plot/quest, and potentially interact with the mentioned NPCs and locations.
-
-"""
-
-    prompt = f"""
-Generate {num_characters} unique and compelling fantasy characters for a D&D-style adventure named '{scenario_name}'.
-Provide a diverse set of classic fantasy archetypes.
-
-{context_section}For each character, provide:
-- name: Full name with title/nickname
-- strength, intelligence, agility: Stats between 1-20
-- backstory: 2-3 sentences about their history and what drives them (reference scenario context when relevant)
-- appearance: 2-3 sentences describing their physical look, clothing, and distinctive features
-- personality: 2-3 sentences about their personality traits, mannerisms, how they speak, and how they interact with others
-- skills: 3-5 specific skills or abilities (e.g., "Swordsmanship", "Lockpicking", "Persuasion", "Arcane Knowledge", "Tracking", "Healing", "Stealth")
-- inventory: 3-5 items they carry (weapons, tools, magical items, personal effects)
-
-Make each character distinctive and memorable with rich details that fit the scenario.
-Skills should match the character's background, stats, and archetype.
-"""
-    concept_result = await retry_on_overload(agent.run, prompt)
-    generated_concepts = concept_result.output.characters
-    logger.info(f"=== {num_characters} Characters Generated ===")
-    logger.info(f"Characters: {concept_result.output.model_dump_json(indent=2)}")
-
-    # Step 2: Synchronous image generation using backend abstraction
-    # Create game-specific directory for character images
-    game_dir = IMAGE_DIR / game_id
-    game_dir.mkdir(parents=True, exist_ok=True)
-
-    generator = await asyncio.to_thread(shared_image_generator)
-
-    # Step 3: Generate images asynchronously (in thread pool to avoid blocking event loop)
-    final_characters: list[Character] = []
-
-    # Generate all images concurrently using asyncio.to_thread
-    image_tasks = [
-        asyncio.to_thread(
-            generate_character_image_sync,
-            generator,
-            concept,
-            scenario_name,
-            game_id,
-            game_dir,
-            idx,
-        )
-        for idx, concept in enumerate(generated_concepts, start=1)
-    ]
-
-    logger.info("Starting concurrent image generation for all characters...")
-    image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
-    logger.info("All image generation tasks completed")
-
-    # Build final character list with image paths
-    for concept, result in zip(generated_concepts, image_results, strict=True):
-        # A failed task comes back as the exception itself, not a (name, path)
-        # tuple, so check before unpacking: one bad portrait must not sink the party.
-        if isinstance(result, BaseException):
-            logger.error(f"Image generation failed for {concept.name}: {result}")
-            image_file_path = None
-        else:
-            _, image_file_path = result
-
-        new_char = Character(
-            name=concept.name,
-            strength=concept.strength,
-            intelligence=concept.intelligence,
-            agility=concept.agility,
-            maximum_health=100,
-            current_health=100,
-            backstory=concept.backstory,
-            appearance=concept.appearance,
-            personality=concept.personality,
-            skills=concept.skills,
-            inventory=concept.inventory,
-            image_path=(
-                f"/static/characters/{game_id}/{image_file_path.name}"
-                if image_file_path
-                else None
-            ),
-        )
-        final_characters.append(new_char)
-
-    logger.info(f"Final character list: {[c.name for c in final_characters]}")
-    return final_characters
 
 
 async def generate_archetypes(

@@ -48,8 +48,6 @@ ART_STYLES: dict[str, str] = {
     "artstation_realism": ARTSTATION_REALISM_STYLE,
 }
 
-DEFAULT_ART_STYLE = "painterly_hero"
-
 
 def resolve_art_style(art_style: str | None) -> str | None:
     """Map an art-style key to its prompt suffix.

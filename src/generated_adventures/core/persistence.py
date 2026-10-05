@@ -76,15 +76,6 @@ def list_saved_games() -> list[tuple[str, str, str]]:
     return games
 
 
-def delete_game(game_id: str) -> bool:
-    """Delete a saved game file. Returns True if deleted, False if not found."""
-    file_path = _game_file_path(game_id)
-    if file_path.exists():
-        file_path.unlink()
-        return True
-    return False
-
-
 # ============================================================================
 # Scenario Template Persistence
 # ============================================================================
@@ -137,12 +128,3 @@ def load_all_scenario_templates() -> list[ScenarioTemplate]:
     # Sort by creation date, newest first
     scenarios.sort(key=lambda s: s.created_at, reverse=True)
     return scenarios
-
-
-def delete_scenario_template(scenario_id: str) -> bool:
-    """Delete a scenario template file. Returns True if deleted, False if not found."""
-    file_path = _scenario_file_path(scenario_id)
-    if file_path.exists():
-        file_path.unlink()
-        return True
-    return False

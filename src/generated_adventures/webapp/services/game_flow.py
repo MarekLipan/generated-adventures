@@ -95,20 +95,6 @@ def get_game_state(game_id: str) -> Game | None:
 # --- Characters ------------------------------------------------------------------
 
 
-async def generate_characters(
-    game_id: str,
-    scenario_name: str,
-    num_characters: int,
-    scenario_details: str | None = None,
-) -> list[Character]:
-    return await characters.generate_characters(
-        game_id=game_id,
-        scenario_name=scenario_name,
-        num_characters=num_characters,
-        scenario_details=scenario_details,
-    )
-
-
 def add_character(game_id: str, character: Character) -> None:
     game.add_character_to_game(game_id, character)
 

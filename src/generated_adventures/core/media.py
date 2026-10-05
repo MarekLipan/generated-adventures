@@ -108,67 +108,6 @@ VOICEOVER_DIR = MEDIA_DIR / "voiceovers"
 VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def generate_character_image_sync(
-    generator: ImageGenerator,
-    concept,
-    scenario_name: str,
-    game_id: str,
-    game_dir: pathlib.Path,
-    idx: int,
-) -> tuple[str, pathlib.Path | None]:
-    """Synchronous helper to generate a single character image.
-
-    Returns: (character_name, image_file_path or None)
-    """
-    # Build detailed prompt using all character information
-    prompt_parts = [
-        "Generate a high quality fantasy character portrait.",
-        f"Character Name: {concept.name}",
-        f"Scenario: {scenario_name}",
-        f"Appearance: {concept.appearance}",
-        f"Personality: {concept.personality}",
-        f"Backstory Context: {concept.backstory}",
-    ]
-
-    # Add key inventory items that would be visible
-    if concept.inventory:
-        visible_items = ", ".join(
-            concept.inventory[:3]
-        )  # First 3 items most likely to be visible
-        prompt_parts.append(f"Notable Equipment: {visible_items}")
-
-    # Add character stats (let the LLM interpret physical implications)
-    prompt_parts.append(
-        f"Character Stats (scale 1-20): "
-        f"Strength {concept.strength}, "
-        f"Intelligence {concept.intelligence}, "
-        f"Agility {concept.agility}"
-    )
-
-    # Art style is injected by the image backend (ImageGenerator._style_suffix)
-    # so it applies uniformly to every image type. Do not add style keywords here.
-
-    prompt_img = " ".join(prompt_parts)
-    logger.info(f"Generating image for character: {concept.name}")
-
-    # Prepare output path
-    safe_name = (
-        "".join(c for c in concept.name if c.isalnum() or c in " _-")
-        .rstrip()
-        .replace(" ", "_")
-    )
-    filename = f"{idx:02d}_{safe_name or 'character'}.png"
-    output_path = game_dir / filename
-
-    # Generate using backend
-    image_file_path = generator.generate_character_image(
-        prompt=prompt_img,
-        output_path=output_path,
-    )
-
-    return concept.name, image_file_path
-
-
 def _prioritize_scene_references(
     assets: dict[str, Asset],
     visible_asset_ids: list[str],
