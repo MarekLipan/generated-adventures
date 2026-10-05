@@ -1,51 +1,136 @@
-# generated-adventures
-A Python app for generating short D&D like adventures with generated story, voice narration and imagery using Multimodal LLMs.
+# Generated Adventures
 
-## Image generation
+[![CI](https://github.com/MarekLipan/generated-adventures/actions/workflows/ci.yml/badge.svg)](https://github.com/MarekLipan/generated-adventures/actions/workflows/ci.yml)
 
-Images come from **FLUX.2 Klein** running locally, or from Gemini in the cloud.
-Choose with `IMAGE_PROVIDER` in `.env` (start from `.env.example`):
+A tabletop-style fantasy adventure for one or more players, run by an LLM acting
+as dungeon master. It invents the scenario, follows what your party does, and
+keeps track of health, items and skills. Every scene is illustrated by an image
+model that keeps each hero recognizable, and narrated aloud with a different
+voice for each character.
 
-| Provider | Runs on | Notes |
-|---|---|---|
-| `flux-klein` (default) | Your NVIDIA GPU or Apple Silicon | Free. Takes multiple reference images natively, so characters stay consistent across scenes. |
-| `gemini` | Google's API | No GPU needed, but image generation requires a billing-enabled key. |
-| `http` | Another machine running `image_server.py` | Lets a laptop use a desktop GPU over the LAN. See [docs/image-server.md](docs/image-server.md). |
+![Two heroes fighting a stone golem in a torchlit dungeon](docs/images/party-scene.jpg)
 
-**First run with `flux-klein`:** the model (~32 GB) is gated on Hugging Face.
-Accept its license on the [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B),
-set `HUGGING_FACE_HUB_TOKEN`, and set `IMAGE_HF_OFFLINE=false` until the download
-finishes. After that the app loads it from the local cache without network access.
+*A two-character scene rendered locally with FLUX.2 Klein on an M1 Max. Each hero
+keeps the face and gear from their portrait.*
 
-### Hardware
+## Features
 
-- **NVIDIA GPU:** nothing to configure. Klein loads with bitsandbytes NF4
-  quantization, about 12–20 s per image on a 10 GB RTX 3080.
-- **Apple Silicon (32 GB):** set `FLUX_KLEIN_GGUF_TRANSFORMER` as shown in
-  `.env.example`. It loads a 4 GB quantized transformer so the whole pipeline fits
-  in memory: about 2 minutes per image on an M1 Max, versus about 9 without it.
+- **Scenarios on demand:** pick a genre (classic fantasy, dark fantasy, mystery)
+  and stakes (a local problem up to world-ending), and get a fresh adventure
+  with its own setting, plot and characters.
+- **Your own heroes:** choose an archetype and an art style, and optionally
+  upload a photo so your hero has your likeness. Photos are only used by the
+  local image model unless you explicitly allow cloud upload.
+- **Consistent illustrations:** scenes are rendered with the heroes' portraits as
+  references, so characters look the same from scene to scene.
+- **Narration:** each scene is read aloud, with a consistent voice for every
+  character who speaks.
+- **A real game:** dice checks, health, inventory and skills that change as the
+  story unfolds, and endings where the quest succeeds or the party falls.
+- **Pick up later:** games save after every turn; a narrated recap catches you up
+  when you come back. Character sheets export to PDF.
 
-### Checking speed and quality
+## How it works
+
+A NiceGUI web app sits on top of a game engine. Each turn, the engine sends the
+story so far to the LLM, which replies with structured data: the scene text, any
+changes to the party, who is in frame and who speaks. The engine applies the
+changes, then renders the illustration and the narration in parallel.
+
+Text comes from Gemini (or any OpenAI-compatible server, such as Ollama). Images
+come from FLUX.2 Klein running locally, or from Gemini. Narration comes from
+Kokoro running locally, or from Gemini.
+
+See [docs/architecture.md](docs/architecture.md) for diagrams and a module guide.
+
+## Getting started
+
+You need [uv](https://docs.astral.sh/uv/) and a
+[Gemini API key](https://aistudio.google.com/apikey) for the story text.
 
 ```bash
-uv run python scripts/benchmark_images.py
+git clone https://github.com/MarekLipan/generated-adventures.git
+cd generated-adventures
+cp .env.example .env    # then set GOOGLE_API_KEY
 ```
 
-Renders portraits, a one-character scene and a multi-character scene with your
-configured backend, and prints how long each step took. Output goes to `test_images/`.
+### Local images and narration (default)
 
-### How to Run
-1. `uv run adventures` and open http://127.0.0.1:8000.
-2. `uv run adventures --reload` while developing (restarts on code changes).
+Needs an NVIDIA GPU with about 10 GB of VRAM, or an Apple Silicon Mac with 32 GB.
 
-### App Flow
-1. User is prompted to enter a how many players will be playing the adventure.
-2. User is prompted to select out of 3 generated fantasy adventure scenarios.
-3. The story of the adventure is generated including the setting, plot, main quest, important NPCs and locations.
-4. User is prompted to select a character for each player out of 6 generated characters.
-5. Party overview is displayed with selected characters.
-6. The opening scene is generated and narrated.
-7. Image is generated to represent the opening scene.
-8. One of the characters is prompted for an action.
-9. The action is processed and the next scene is generated and narrated.
-10. The process continues until the adventure is completed.
+1. `uv sync` installs everything, including PyTorch and the model libraries.
+2. FLUX.2 Klein is gated on Hugging Face. Accept its license on the
+   [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B), then
+   in `.env` set `HUGGING_FACE_HUB_TOKEN` and `IMAGE_HF_OFFLINE=false` for the first
+   run, which downloads about 32 GB. After that the app runs from the local cache.
+3. Download the narration model files as described in
+   [docs/narration.md](docs/narration.md).
+4. **On a Mac**, also set `FLUX_KLEIN_GGUF_TRANSFORMER` (see `.env.example`). It
+   cuts image time from about 9 minutes to 2–4; see
+   [docs/apple-silicon.md](docs/apple-silicon.md).
+
+### Cloud only
+
+No GPU needed. Skip the local model libraries and use Gemini for everything:
+
+```bash
+uv sync --no-group local-image --no-group local-tts
+```
+
+and in `.env` set `IMAGE_PROVIDER=gemini` and `TTS_PROVIDER=gemini` (or `none`).
+Gemini image generation requires billing to be enabled on your API key.
+
+### Play
+
+```bash
+uv run adventures
+```
+
+and open http://127.0.0.1:8000. Use `--host 0.0.0.0` to open it from another
+device on your network, or `--reload` while developing.
+
+To render images on a desktop GPU while playing on a laptop, run
+`uv run adventures-image-server` on the desktop. See
+[docs/image-server.md](docs/image-server.md).
+
+## Performance
+
+Time per image with FLUX.2 Klein 9B (4 steps):
+
+| Hardware | Setup | Portrait | Scene |
+|---|---|---|---|
+| NVIDIA RTX 3080, 10 GB | bitsandbytes NF4 | about 12–20 s | about 12–20 s |
+| Apple M1 Max, 32 GB | GGUF Q2_K transformer | about 2 min | about 4 min |
+
+The RTX 3080 figure comes from the project's development notes. The M1 Max
+figures come from `scripts/benchmark_images.py`, which reproduces them on your
+own hardware.
+
+## Development
+
+```bash
+uv run pytest                  # tests (live API tests are opt-in: -m live)
+uv run ruff check .            # lint
+uv run ruff format --check .   # formatting
+uv run pyrefly check           # types, against pyrefly-baseline.json
+uv run lint-imports            # architecture rules (docs/architecture.md)
+```
+
+CI runs all of these on every push.
+
+```
+src/generated_adventures/
+  core/              game engine: state, generation, prompts, media, model backends
+    generation/      LLM steps: scenarios, characters, scenes, recap
+  webapp/            NiceGUI UI and the service layer it calls
+  image_server.py    optional remote image service
+tests/
+scripts/             benchmark_images.py
+docs/
+```
+
+## License
+
+The code is licensed under [Apache 2.0](LICENSE). The models it downloads have
+their own licenses; FLUX.2 Klein 9B, for example, is released under a
+non-commercial license.
