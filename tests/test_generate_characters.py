@@ -20,7 +20,9 @@ def _concept(name: str) -> GeneratedCharacter:
     )
 
 
-async def test_one_failed_portrait_does_not_sink_the_party(fake_llm, monkeypatch, tmp_path):
+async def test_one_failed_portrait_does_not_sink_the_party(
+    fake_llm, monkeypatch, tmp_path
+):
     concepts = GeneratedCharacterList(characters=[_concept("Ada"), _concept("Brann")])
     fake_llm(lambda: ModelResponse(parts=[TextPart(concepts.model_dump_json())]))
 
@@ -35,7 +37,9 @@ async def test_one_failed_portrait_does_not_sink_the_party(fake_llm, monkeypatch
     monkeypatch.setattr(generator, "_get_image_generator", lambda: object())
     monkeypatch.setattr(generator, "_generate_character_image_sync", render)
 
-    party = await generator.generate_characters("g1", "The Frozen Pass", num_characters=2)
+    party = await generator.generate_characters(
+        "g1", "The Frozen Pass", num_characters=2
+    )
 
     assert [c.name for c in party] == ["Ada", "Brann"]
     assert party[0].image_path == "/static/characters/g1/1.png"

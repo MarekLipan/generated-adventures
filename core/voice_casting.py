@@ -21,19 +21,19 @@ from collections.abc import Iterable
 # accent variety; ranked best-grade first.
 MALE_VOICES = [
     "am_michael",  # US, steady (C+)
-    "am_fenrir",   # US, deep (C+)
-    "am_puck",     # US, lively (C+)
-    "bm_george",   # UK, warm (C)
-    "bm_fable",    # UK, storybook (C)
+    "am_fenrir",  # US, deep (C+)
+    "am_puck",  # US, lively (C+)
+    "bm_george",  # UK, warm (C)
+    "bm_fable",  # UK, storybook (C)
 ]
 
 FEMALE_VOICES = [
-    "af_heart",     # US, warm (A, top-rated)
-    "af_bella",     # US, rich (A-)
-    "af_nicole",    # US, soft (B-)
-    "bf_emma",      # UK, measured (B-)
-    "af_aoede",     # US, clear (C+)
-    "af_sarah",     # US, steady (C+)
+    "af_heart",  # US, warm (A, top-rated)
+    "af_bella",  # US, rich (A-)
+    "af_nicole",  # US, soft (B-)
+    "bf_emma",  # UK, measured (B-)
+    "af_aoede",  # US, clear (C+)
+    "af_sarah",  # US, steady (C+)
     "bf_isabella",  # UK, elegant (C)
 ]
 
@@ -81,7 +81,9 @@ def cast_voice(
         # voices are left out. Keep it that way: minor speakers aren't persisted
         # and are cast by hash(name) % len(pool), so growing the pool would change
         # the voices of recurring speakers in existing saves.
-        pool = [v for pair in zip(MALE_VOICES, FEMALE_VOICES, strict=False) for v in pair]
+        pool = [
+            v for pair in zip(MALE_VOICES, FEMALE_VOICES, strict=False) for v in pair
+        ]
 
     taken_set = set(taken or ())
     if exclude:

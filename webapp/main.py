@@ -44,7 +44,9 @@ def _install_benign_error_filter() -> None:
     def handler(loop, context):
         exc = context.get("exception")
         handle = repr(context.get("handle", ""))
-        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, OSError)) and (
+        if isinstance(
+            exc, (ConnectionResetError, ConnectionAbortedError, OSError)
+        ) and (
             "_call_connection_lost" in handle or "_ProactorBasePipeTransport" in handle
         ):
             return  # benign socket-shutdown race on a dropped client connection
@@ -77,7 +79,7 @@ def main_page():
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
         '<link href="https://fonts.googleapis.com/css2?'
         "family=Cinzel:wght@400;600;700&"
-        "family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap\" rel=\"stylesheet\">"
+        'family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">'
     )
 
     # Set dark mode

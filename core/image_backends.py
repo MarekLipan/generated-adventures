@@ -757,7 +757,9 @@ class FluxKleinImageGenerator(ImageGenerator):
         try:
             from diffusers import Flux2KleinInpaintPipeline
         except ImportError:
-            logger.warning("Flux2KleinInpaintPipeline unavailable in this diffusers build")
+            logger.warning(
+                "Flux2KleinInpaintPipeline unavailable in this diffusers build"
+            )
             return None
         try:
             self._inpaint_pipe = Flux2KleinInpaintPipeline.from_pipe(self.pipe)
@@ -834,7 +836,8 @@ class FluxKleinImageGenerator(ImageGenerator):
 
         if directions:
             layout = " ".join(
-                f"On the {slot}: {d}." for slot, d in zip(slots, directions, strict=True)
+                f"On the {slot}: {d}."
+                for slot, d in zip(slots, directions, strict=True)
             )
             base_prompt = (
                 f"{prompt}. Place the characters exactly as follows, each clearly "
@@ -877,7 +880,9 @@ class FluxKleinImageGenerator(ImageGenerator):
             return canvas
 
         strength = float(settings.IMAGE_COMPOSITE_STRENGTH)
-        for i, (ref, box) in enumerate(zip(refs, self._subject_regions(n, width, height), strict=True), 1):
+        for i, (ref, box) in enumerate(
+            zip(refs, self._subject_regions(n, width, height), strict=True), 1
+        ):
             mask = Image.new("L", (width, height), 0)
             ImageDraw.Draw(mask).rectangle(box, fill=255)
             # Feather the mask so the repainted region blends with the plate.
@@ -905,7 +910,9 @@ class FluxKleinImageGenerator(ImageGenerator):
                         generator=self._make_generator(),
                     ).images[0]
             except Exception as e:  # noqa: BLE001 - keep whatever we have so far
-                logger.warning(f"Subject {i} refinement failed ({e}); keeping current render")
+                logger.warning(
+                    f"Subject {i} refinement failed ({e}); keeping current render"
+                )
                 break
         return canvas
 

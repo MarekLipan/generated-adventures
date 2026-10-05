@@ -355,9 +355,10 @@ def _resolve_image_subject_ids(
             if aid in ids:
                 continue
             is_party = aid.startswith("player_")
-            matched = (
-                asset.name.lower() == name.lower()
-                or (names_match(name, asset.name) if is_party else npc_names_match(name, asset.name))
+            matched = asset.name.lower() == name.lower() or (
+                names_match(name, asset.name)
+                if is_party
+                else npc_names_match(name, asset.name)
             )
             if matched:
                 ids.append(aid)
@@ -434,9 +435,7 @@ def _generate_scene_image_sync(
         # in the SAME order the renderer will lay out and repaint them. Keeping these
         # parallel is what stops one character being painted into another's pose.
         if subject_directions:
-            aligned_directions = [
-                subject_directions.get(aid, "") for aid in kept_ids
-            ]
+            aligned_directions = [subject_directions.get(aid, "") for aid in kept_ids]
             if not any(aligned_directions):
                 aligned_directions = []
 
@@ -766,7 +765,9 @@ WORLD & SETTING (non-spoiler background — the tone and locale the players begi
             "carrying signature, storied equipment."
         ),
     }.get(scale_key, "")
-    scale_section = f"\nHERO STATURE — match this level EXACTLY:\n{stature}\n" if stature else ""
+    scale_section = (
+        f"\nHERO STATURE — match this level EXACTLY:\n{stature}\n" if stature else ""
+    )
 
     prompt = f"""
 You are designing playable hero archetypes for a D&D-style adventure named '{scenario_name}'.
@@ -1239,7 +1240,9 @@ async def generate_scenario_template(
         f"\nGENRE / THEME — follow this closely:\n{theme_steering}\n" if themed else ""
     )
     scale_section = (
-        f"\nSTAKES / SCALE — follow this closely:\n{scale_steering}\n" if scale_steering else ""
+        f"\nSTAKES / SCALE — follow this closely:\n{scale_steering}\n"
+        if scale_steering
+        else ""
     )
     avoid_section = _avoid_names_section(
         avoid_names,

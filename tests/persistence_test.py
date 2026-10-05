@@ -34,7 +34,9 @@ def test_saved_game_is_listed(make_character):
     game_id = game.create_new_game(players=1)
     game.add_character_to_game(game_id, make_character())
 
-    listed = {gid: (name, summary) for gid, name, summary in persistence.list_saved_games()}
+    listed = {
+        gid: (name, summary) for gid, name, summary in persistence.list_saved_games()
+    }
 
     # No template was saved for this game, so the name falls back.
     assert listed[game_id] == ("Unknown Scenario", "1 characters, 0 scenes")

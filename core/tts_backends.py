@@ -86,9 +86,7 @@ class TTSGenerator(ABC):
     supports_multivoice: bool = False
 
     @abstractmethod
-    def synthesize(
-        self, text: str, output_path: pathlib.Path
-    ) -> pathlib.Path | None:
+    def synthesize(self, text: str, output_path: pathlib.Path) -> pathlib.Path | None:
         """Synthesize narration for `text` and save a WAV to `output_path`.
 
         Returns the path on success, or None on failure.
@@ -131,9 +129,7 @@ class KokoroTTSGenerator(TTSGenerator):
         self.speed = settings.KOKORO_SPEED
         logger.info("✓ Kokoro TTS ready")
 
-    def synthesize(
-        self, text: str, output_path: pathlib.Path
-    ) -> pathlib.Path | None:
+    def synthesize(self, text: str, output_path: pathlib.Path) -> pathlib.Path | None:
         try:
             clean = _clean_for_tts(text)
             if not clean:
@@ -202,9 +198,7 @@ class GeminiTTSGenerator(TTSGenerator):
         self.client = genai_client.Client(api_key=api_key)
         self.voice = settings.GEMINI_TTS_VOICE
 
-    def synthesize(
-        self, text: str, output_path: pathlib.Path
-    ) -> pathlib.Path | None:
+    def synthesize(self, text: str, output_path: pathlib.Path) -> pathlib.Path | None:
         from google.genai import types as genai_types  # type: ignore
 
         narration_prompt = f"""You are an expert fantasy audiobook narrator and Dungeon Master bringing an adventure to life.

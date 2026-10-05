@@ -38,12 +38,25 @@ def _rename_in_text(text: str, old_name: str, new_name: str) -> str:
         return text
 
     # Full name first (word-boundary, case-insensitive).
-    text = re.sub(rf"\b{re.escape(old_name.strip())}\b", new_name.strip(), text, flags=re.IGNORECASE)
+    text = re.sub(
+        rf"\b{re.escape(old_name.strip())}\b",
+        new_name.strip(),
+        text,
+        flags=re.IGNORECASE,
+    )
 
     # Then map name tokens unique to the OLD name onto those unique to the NEW one
     # (e.g. "Thaddeus" -> "Baxx"), leaving shared titles like "Archivist" untouched.
-    old_toks = [t for t in re.findall(r"[A-Za-z']+", old_name) if t.lower() not in _NAME_TITLE_WORDS]
-    new_toks = [t for t in re.findall(r"[A-Za-z']+", new_name) if t.lower() not in _NAME_TITLE_WORDS]
+    old_toks = [
+        t
+        for t in re.findall(r"[A-Za-z']+", old_name)
+        if t.lower() not in _NAME_TITLE_WORDS
+    ]
+    new_toks = [
+        t
+        for t in re.findall(r"[A-Za-z']+", new_name)
+        if t.lower() not in _NAME_TITLE_WORDS
+    ]
     new_lower = {t.lower() for t in new_toks}
     old_lower = {t.lower() for t in old_toks}
     old_only = [t for t in old_toks if t.lower() not in new_lower]
@@ -53,6 +66,7 @@ def _rename_in_text(text: str, old_name: str, new_name: str) -> str:
         for tok in old_only:
             text = re.sub(rf"\b{re.escape(tok)}\b", repl, text, flags=re.IGNORECASE)
     return text
+
 
 # Art styles offered at the start of a scenario. Keys must match core.models.ArtStyle.
 ART_STYLE_OPTIONS = [
@@ -187,9 +201,9 @@ async def create_hero_for_player(
                     "freshly-imagined hero face instead."
                 ).classes("text-xs fantasy-text-muted mb-3")
 
-                status_label = ui.label("No photo uploaded — your hero's face will be invented.").classes(
-                    "text-xs fantasy-text-muted mb-2"
-                )
+                status_label = ui.label(
+                    "No photo uploaded — your hero's face will be invented."
+                ).classes("text-xs fantasy-text-muted mb-2")
 
                 def _on_upload(e):
                     data = e.content.read()
@@ -200,9 +214,7 @@ async def create_hero_for_player(
                     status_label.set_text(
                         f"✓ Photo ready: {e.name} — your hero will resemble you."
                     )
-                    status_label.classes(
-                        replace="text-xs fantasy-text-gold mb-2"
-                    )
+                    status_label.classes(replace="text-xs fantasy-text-gold mb-2")
 
                 def _on_remove(_e=None):
                     photo_holder["bytes"] = None
@@ -223,9 +235,7 @@ async def create_hero_for_player(
 
             # --- Gender (drives the narrator's pronouns for this hero) ---
             with ui.card().classes("w-full mb-6 p-4"):
-                ui.label("⚧ Character Gender").classes(
-                    "text-h6 fantasy-text-gold mb-2"
-                )
+                ui.label("⚧ Character Gender").classes("text-h6 fantasy-text-gold mb-2")
                 ui.label(
                     "The Dungeon Master uses this so the story refers to your hero "
                     "with the right pronouns."
@@ -239,9 +249,7 @@ async def create_hero_for_player(
                 ).props("inline color=amber").bind_value(gender_holder, "value")
 
             # --- Archetype cards ---
-            ui.label("🛡️ Choose an Archetype").classes(
-                "text-h5 fantasy-text-gold mb-3"
-            )
+            ui.label("🛡️ Choose an Archetype").classes("text-h5 fantasy-text-gold mb-3")
             with ui.grid(columns=2).classes("w-full gap-4"):
                 for archetype in available:
                     with ui.card().classes("character-card w-full"):
@@ -391,9 +399,9 @@ def _show_hero_preview(
             ui.label(
                 f"✨ Meet Your Hero — Player {player_index} of {total_players}"
             ).classes("text-h4 mb-2")
-            ui.label(
-                f"Archetype: {archetype.name}"
-            ).classes("text-sm fantasy-text-muted mb-4")
+            ui.label(f"Archetype: {archetype.name}").classes(
+                "text-sm fantasy-text-muted mb-4"
+            )
 
             # Large portrait preview — the party-card thumbnail alone is too small
             # to appreciate the full-resolution render.
@@ -406,9 +414,9 @@ def _show_hero_preview(
             render_character_cards([hero], game_id)
 
             # Rename
-            name_input = ui.input(
-                label="Hero Name", value=hero.name
-            ).classes("w-full max-w-md mt-4")
+            name_input = ui.input(label="Hero Name", value=hero.name).classes(
+                "w-full max-w-md mt-4"
+            )
 
             with ui.row().classes("gap-3 mt-4 w-full"):
                 ui.button(
@@ -427,23 +435,25 @@ def _show_hero_preview(
                         )
                     ),
                 ).classes("text-lg")
-                ui.button(
-                    "🔄 Regenerate",
-                    on_click=lambda _e=None: asyncio.create_task(
-                        _do_generate_hero(
-                            main_container,
-                            game_id,
-                            scenario_name,
-                            archetypes,
-                            player_index,
-                            chosen_archetypes,
-                            archetype,
-                            photo_holder,
-                            gender_holder,
-                            name_input.value or None,
-                        )
-                    ),
-                ).props("outline"),
+                (
+                    ui.button(
+                        "🔄 Regenerate",
+                        on_click=lambda _e=None: asyncio.create_task(
+                            _do_generate_hero(
+                                main_container,
+                                game_id,
+                                scenario_name,
+                                archetypes,
+                                player_index,
+                                chosen_archetypes,
+                                archetype,
+                                photo_holder,
+                                gender_holder,
+                                name_input.value or None,
+                            )
+                        ),
+                    ).props("outline"),
+                )
                 ui.button(
                     "↩ Pick a Different Archetype",
                     on_click=lambda _e=None: asyncio.create_task(

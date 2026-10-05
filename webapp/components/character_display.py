@@ -98,9 +98,9 @@ def render_character_cards(characters, game_id: str = None):
                             ui.label("None").classes("inv-empty")
 
                     # Lore behind a toggle (appearance / personality / backstory)
-                    with ui.expansion("📖 Lore & Appearance", icon="auto_stories").classes(
-                        "w-full mt-1"
-                    ):
+                    with ui.expansion(
+                        "📖 Lore & Appearance", icon="auto_stories"
+                    ).classes("w-full mt-1"):
                         ui.label("Appearance").classes(
                             "font-bold text-xs mt-2 fantasy-text-gold"
                         )

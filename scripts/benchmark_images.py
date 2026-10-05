@@ -63,7 +63,9 @@ def main() -> int:
     parser.add_argument("--out", type=pathlib.Path, default=pathlib.Path("test_images"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
 
     timings: list[tuple[str, float, bool]] = []
 
@@ -81,7 +83,9 @@ def main() -> int:
         path = args.out / f"bench_portrait_{name.split()[0].lower()}.png"
         result = timed(
             f"portrait: {name}",
-            lambda n=name, lk=look, p=path: generator.generate_character_image(f"{n}, {lk}", p),
+            lambda n=name, lk=look, p=path: generator.generate_character_image(
+                f"{n}, {lk}", p
+            ),
         )
         if result:
             portraits.append(result)
@@ -90,7 +94,9 @@ def main() -> int:
         timed(
             "scene: 1 character",
             lambda: generator.generate_scene_image(
-                SOLO_SCENE, args.out / "bench_scene_solo.png", reference_images=portraits[:1]
+                SOLO_SCENE,
+                args.out / "bench_scene_solo.png",
+                reference_images=portraits[:1],
             ),
         )
     if len(portraits) > 1:

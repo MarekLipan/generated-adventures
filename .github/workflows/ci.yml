@@ -23,6 +23,9 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Format
+        run: uv run ruff format --check .
+
       # Fails only on type errors not recorded in pyrefly-baseline.json.
       - name: Type check
         run: uv run pyrefly check

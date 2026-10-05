@@ -45,7 +45,9 @@ def fake_llm(monkeypatch):
 
         # The generator uses NativeOutput, which needs a model that advertises
         # JSON-schema output.
-        model = FunctionModel(fn, profile=ModelProfile(supports_json_schema_output=True))
+        model = FunctionModel(
+            fn, profile=ModelProfile(supports_json_schema_output=True)
+        )
         monkeypatch.setattr(generator, "_get_text_model", lambda: model)
         return prompts
 

@@ -50,7 +50,8 @@ class ImageSubject(BaseModel):
     """
 
     name: str = Field(
-        ..., description="EXACT name of the character/NPC/object (as in assets_present or the party)"
+        ...,
+        description="EXACT name of the character/NPC/object (as in assets_present or the party)",
     )
     action: str = Field(
         "",

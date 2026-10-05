@@ -106,10 +106,11 @@ async def show_scenarios(main_container, game_id: str):
                                     ).classes("text-sm fantasy-text-muted")
                                 ui.button(
                                     "⚔️ Select This Adventure",
-                                    on_click=lambda _event=None,
-                                    s=scenario: asyncio.create_task(
-                                        handle_scenario_selection(
-                                            main_container, game_id, s.id
+                                    on_click=lambda _event=None, s=scenario: (
+                                        asyncio.create_task(
+                                            handle_scenario_selection(
+                                                main_container, game_id, s.id
+                                            )
                                         )
                                     ),
                                 ).classes("ml-auto")

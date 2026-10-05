@@ -49,7 +49,9 @@ async def test_returns_parsed_model_output(fake_llm, make_character):
     recap = await _recap([make_character()])
 
     assert recap.recap_text == reply["recap_text"]
-    assert [(s.scene_id, s.summary) for s in recap.scene_summaries] == [(1, "Crossed the pass.")]
+    assert [(s.scene_id, s.summary) for s in recap.scene_summaries] == [
+        (1, "Crossed the pass.")
+    ]
 
 
 async def test_falls_back_when_model_fails(fake_llm, make_character):

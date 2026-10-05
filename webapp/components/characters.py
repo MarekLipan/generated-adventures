@@ -149,14 +149,15 @@ async def show_characters(
                             # Select button
                             ui.button(
                                 "⚔️ Select This Hero",
-                                on_click=lambda _e=None,
-                                c=character: asyncio.create_task(
-                                    select_character(
-                                        main_container,
-                                        game_id,
-                                        scenario_name,
-                                        c,
-                                        all_characters,
+                                on_click=lambda _e=None, c=character: (
+                                    asyncio.create_task(
+                                        select_character(
+                                            main_container,
+                                            game_id,
+                                            scenario_name,
+                                            c,
+                                            all_characters,
+                                        )
                                     )
                                 ),
                             ).classes("mt-3 w-full")
