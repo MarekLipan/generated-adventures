@@ -179,6 +179,56 @@ class GeminiImageGenerator(ImageGenerator):
 
         self.client = genai_client.Client(api_key=api_key)
 
+    def _render(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+        reference_images: list[pathlib.Path] | None,
+        art_style: str | None,
+        *,
+        kind: str,
+        config=None,
+    ) -> pathlib.Path | None:
+        """Send the prompt and any permitted references; save the returned image."""
+        try:
+            from google.genai import types as genai_types
+
+            content_parts = [f"{prompt} {self._style_suffix(art_style)}".strip()]
+
+            # Reference images (e.g. a player's profile photo) are only uploaded to
+            # this cloud backend when explicitly allowed; otherwise dropped.
+            refs = [pathlib.Path(r) for r in _filter_cloud_references(reference_images)]
+            for ref_path in refs:
+                if ref_path.exists():
+                    content_parts.append(
+                        genai_types.Part.from_bytes(
+                            data=ref_path.read_bytes(), mime_type="image/png"
+                        )
+                    )
+            if refs:
+                logger.info(f"✓ Gemini: Using {len(refs)} reference images")
+
+            response = self.client.models.generate_content(
+                model=settings.GEMINI_IMAGE_MODEL,
+                contents=content_parts,
+                config=config,
+            )
+
+            for part in response.candidates[0].content.parts:  # type: ignore[index]
+                if getattr(part, "inline_data", None) and getattr(
+                    part.inline_data, "data", None
+                ):
+                    Image.open(io.BytesIO(part.inline_data.data)).save(output_path)
+                    logger.info(f"✓ Gemini: Saved {kind} image to {output_path}")
+                    return output_path
+
+            logger.warning(f"Gemini returned no {kind} image")
+            return None
+
+        except Exception as e:
+            logger.error(f"Gemini {kind} image generation failed: {e}")
+            return None
+
     def generate_character_image(
         self,
         prompt: str,
@@ -186,45 +236,9 @@ class GeminiImageGenerator(ImageGenerator):
         reference_images: list[pathlib.Path] | None = None,
         art_style: str | None = None,
     ) -> pathlib.Path | None:
-        """Generate character image using Gemini."""
-        try:
-            from google.genai import types as genai_types  # type: ignore
-
-            suffix = self._style_suffix(art_style)
-            content_parts = [f"{prompt} {suffix}".strip()]
-
-            # Reference images (e.g. a player's profile photo) are only uploaded to
-            # this cloud backend when explicitly allowed; otherwise dropped.
-            for ref_path in _filter_cloud_references(reference_images):
-                ref_path = pathlib.Path(ref_path)
-                if ref_path.exists():
-                    content_parts.append(
-                        genai_types.Part.from_bytes(
-                            data=ref_path.read_bytes(), mime_type="image/png"
-                        )
-                    )
-
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_IMAGE_MODEL,
-                contents=content_parts,
-            )
-
-            # Extract image from response
-            for part in response.candidates[0].content.parts:  # type: ignore[index]
-                if getattr(part, "inline_data", None) and getattr(
-                    part.inline_data, "data", None
-                ):
-                    img = Image.open(io.BytesIO(part.inline_data.data))
-                    img.save(output_path)
-                    logger.info(f"✓ Gemini: Saved image to {output_path}")
-                    return output_path
-
-            logger.warning("Gemini returned no image data")
-            return None
-
-        except Exception as e:
-            logger.error(f"Gemini image generation failed: {e}")
-            return None
+        return self._render(
+            prompt, output_path, reference_images, art_style, kind="character"
+        )
 
     def generate_scene_image(
         self,
@@ -234,54 +248,16 @@ class GeminiImageGenerator(ImageGenerator):
         art_style: str | None = None,
         subject_directions: list[str] | None = None,
     ) -> pathlib.Path | None:
-        """Generate scene image with Gemini (supports reference images)."""
-        from google.genai import types as genai_config  # type: ignore
-        from google.genai import types as genai_types  # type: ignore
+        from google.genai import types as genai_types
 
-        try:
-            suffix = self._style_suffix(art_style)
-            content_parts = [f"{prompt} {suffix}".strip()]
-
-            # Reference images are only uploaded to this cloud backend when allowed.
-            refs = _filter_cloud_references(reference_images)
-            if refs:
-                for ref_path in refs:
-                    if ref_path.exists():
-                        with open(ref_path, "rb") as f:
-                            image_data = f.read()
-                        content_parts.append(
-                            genai_types.Part.from_bytes(
-                                data=image_data, mime_type="image/png"
-                            )
-                        )
-                logger.info(f"✓ Gemini: Using {len(refs)} reference images")
-
-            config = genai_config.GenerateContentConfig(
-                response_modalities=["image"],
-            )
-
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_IMAGE_MODEL,
-                contents=content_parts,
-                config=config,
-            )
-
-            # Extract and save image
-            for part in response.candidates[0].content.parts:  # type: ignore[index]
-                if getattr(part, "inline_data", None) and getattr(
-                    part.inline_data, "data", None
-                ):
-                    img = Image.open(io.BytesIO(part.inline_data.data))
-                    img.save(output_path)
-                    logger.info(f"✓ Gemini: Saved scene image to {output_path}")
-                    return output_path
-
-            logger.warning("Gemini returned no scene image")
-            return None
-
-        except Exception as e:
-            logger.error(f"Gemini scene generation failed: {e}")
-            return None
+        return self._render(
+            prompt,
+            output_path,
+            reference_images,
+            art_style,
+            kind="scene",
+            config=genai_types.GenerateContentConfig(response_modalities=["image"]),
+        )
 
 
 class FluxKleinImageGenerator(ImageGenerator):
@@ -1063,13 +1039,16 @@ class HttpImageGenerator(ImageGenerator):
             logger.error(f"Image server request to {path} failed: {e}")
             return None
 
-    def generate_character_image(
+    def _render(
         self,
+        endpoint: str,
+        field: str,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: list[pathlib.Path] | None = None,
-        art_style: str | None = None,
+        references: list[pathlib.Path],
+        art_style: str | None,
     ) -> pathlib.Path | None:
+        """POST the prompt with reference images as `field`; save the returned PNG."""
         data = {"prompt": prompt}
         if art_style:
             data["art_style"] = art_style
@@ -1077,21 +1056,16 @@ class HttpImageGenerator(ImageGenerator):
         files = []
         open_handles = []
         try:
-            # Only the first reference (the player photo) drives a portrait.
-            for ref in (reference_images or [])[:1]:
+            for ref in references:
                 ref = pathlib.Path(ref)
                 if not ref.exists():
                     logger.warning(f"Reference image not found, skipping: {ref}")
                     continue
                 fh = ref.open("rb")
                 open_handles.append(fh)
-                files.append(("photo", (ref.name, fh, "image/png")))
+                files.append((field, (ref.name, fh, "image/png")))
 
-            png = self._post(
-                "/generate/character",
-                data=data,
-                files=files or None,
-            )
+            png = self._post(endpoint, data=data, files=files or None)
         finally:
             for fh in open_handles:
                 fh.close()
@@ -1099,8 +1073,25 @@ class HttpImageGenerator(ImageGenerator):
         if png is None:
             return None
         pathlib.Path(output_path).write_bytes(png)
-        logger.info(f"✓ HTTP: Saved character image to {output_path}")
+        logger.info(f"✓ HTTP: Saved {endpoint} image to {output_path}")
         return output_path
+
+    def generate_character_image(
+        self,
+        prompt: str,
+        output_path: pathlib.Path,
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+    ) -> pathlib.Path | None:
+        # Only the first reference (the player photo) drives a portrait.
+        return self._render(
+            "/generate/character",
+            "photo",
+            prompt,
+            output_path,
+            (reference_images or [])[:1],
+            art_style,
+        )
 
     def generate_scene_image(
         self,
@@ -1110,36 +1101,14 @@ class HttpImageGenerator(ImageGenerator):
         art_style: str | None = None,
         subject_directions: list[str] | None = None,
     ) -> pathlib.Path | None:
-        data = {"prompt": prompt}
-        if art_style:
-            data["art_style"] = art_style
-
-        files = []
-        open_handles = []
-        try:
-            for ref in reference_images or []:
-                ref = pathlib.Path(ref)
-                if not ref.exists():
-                    logger.warning(f"Reference image not found, skipping: {ref}")
-                    continue
-                fh = ref.open("rb")
-                open_handles.append(fh)
-                files.append(("references", (ref.name, fh, "image/png")))
-
-            png = self._post(
-                "/generate/scene",
-                data=data,
-                files=files or None,
-            )
-        finally:
-            for fh in open_handles:
-                fh.close()
-
-        if png is None:
-            return None
-        pathlib.Path(output_path).write_bytes(png)
-        logger.info(f"✓ HTTP: Saved scene image to {output_path}")
-        return output_path
+        return self._render(
+            "/generate/scene",
+            "references",
+            prompt,
+            output_path,
+            reference_images or [],
+            art_style,
+        )
 
 
 def get_image_generator() -> ImageGenerator:
