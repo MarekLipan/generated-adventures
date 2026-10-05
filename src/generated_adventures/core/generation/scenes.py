@@ -223,113 +223,30 @@ def _process_scene_location(
     return updated_locations, None
 
 
-async def generate_opening_scene(
+async def _run_scene(
+    prompt: str,
+    *,
+    label: str,
     game_id: str,
+    scene_id: int,
     scenario_name: str,
-    scenario_details: str,
     characters: list[Character],
     existing_assets: dict[str, Asset],
     existing_locations: dict[str, Location],
-    scene_id: int = 1,
-    art_style: str | None = None,
-    scale: str = "any",
+    art_style: str | None,
 ) -> tuple[Scene, list[Character], dict[str, Asset], dict[str, Location]]:
-    """Generate the opening scene for the chosen scenario.
+    """Ask the LLM for a scene and turn its reply into a playable scene.
 
-    Args:
-        game_id: Unique identifier for the game (for image storage)
-        scenario_name: Name of the chosen scenario
-        scenario_details: Full markdown details about the scenario
-        characters: List of Character objects in the party (with full stats, inventory, backstory)
-        existing_assets: Dictionary of existing assets (NPCs/objects) for consistency
-        existing_locations: Dictionary of existing locations for consistency
-        scene_id: Scene identifier (default 1 for opening)
-
-    Returns:
-        Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
+    Shared by the opening and every later scene: apply the party's changes,
+    resolve the location and assets, then render the image and narration in
+    parallel.
     """
     agent = text_agent(GeneratedScene)
-
-    logger.info(f"Generating opening scene for: {scenario_name}")
-
-    # Build detailed character information for context
-    character_sheets = "\n\n".join(
-        [
-            f"**{char.name}**\n"
-            f"- Gender: {getattr(char, 'gender', 'unspecified')} (use matching pronouns)\n"
-            f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
-            f"- Health: {char.current_health}/{char.maximum_health}\n"
-            f"- Backstory: {char.backstory}\n"
-            f"- Appearance: {char.appearance}\n"
-            f"- Personality: {char.personality}\n"
-            f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
-            f"- Inventory: {format_inventory(char.inventory)}"
-            for char in characters
-        ]
-    )
-
-    prompt = f"""
-You are a creative Dungeon Master for a D&D-style adventure.
-
-SCENARIO: {scenario_name}
-
-SCENARIO DETAILS:
-{scenario_details}
-{scene_scale_section(scale)}
-PARTY CHARACTER SHEETS:
-{character_sheets}
-
-{format_existing_assets(existing_assets)}
-
-{format_existing_locations(existing_locations)}
-
-Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
-
-CRITICAL FOR OPENING SCENE:
-1. **Ground how the party arrived HERE**: Before anything happens, establish how these characters
-   came to be at this exact place — their journey in, why they're passing through, or the ordinary
-   moment they are in as the scene opens. Use their backstories for natural connections (travelling
-   together, hired on, drawn by rumor, chance). 2-4 sentences of grounded on-ramp so the start feels
-   lived-in and earned, not dropped in cold.
-
-2. **Ease into the situation — do NOT cold-open with a quest-giver**: Avoid starting with an elder,
-   mayor, or official who immediately tells the party to go somewhere and do something — that feels
-   forced. Let the place and a natural moment draw them in first: something they notice, overhear,
-   stumble into, or are asked in passing. The hook should emerge from lived experience, not an
-   exposition dump.
-
-3. **Introduce the goal naturally and at the right pace**: Players don't know the scenario details,
-   so reveal the objective gradually through what they see and do — not a briefing. Give a reason to
-   care and a direction, but a smaller, closer hook first is good; let any larger stakes surface over
-   time rather than all at once.
-
-4. **Set the scene and mood**: Create atmosphere with vivid descriptions
-   - Describe the environment, sounds, smells, lighting
-   - Build tension or intrigue appropriate to the scenario
-
-5. **Introduce party members naturally**: Reference characters by name, appearance, and personality
-   - Show their personalities through brief actions or reactions
-   - Consider their backstories when describing how they interact
-   - Be aware of their stats, health, skills, and inventory
-
-6. **End with a clear hook**: Give players an immediate decision or action to take
-
-REMEMBER: This is the first thing players experience. They need to understand:
-- Who they are (as a group)
-- Where they are
-- What their goal/quest is
-- What they should do next
-
-{build_scene_generation_prompt_rules()}
-
-Make the scene immersive, clear, and exciting!
-"""
-
     result = await retry_on_overload(agent.run, prompt)
     generated = result.output
 
     # Log generated scene details
-    logger.info(f"=== Opening Scene Generated (Scene {scene_id}) ===")
+    logger.info(f"=== {label} Scene Generated (Scene {scene_id}) ===")
     logger.info(
         f"Generated scene model: {generated.model_dump_json(indent=2, exclude={'scene_text'})}"
     )
@@ -437,6 +354,120 @@ Make the scene immersive, clear, and exciting!
     return scene, updated_characters, updated_assets, updated_locations
 
 
+async def generate_opening_scene(
+    game_id: str,
+    scenario_name: str,
+    scenario_details: str,
+    characters: list[Character],
+    existing_assets: dict[str, Asset],
+    existing_locations: dict[str, Location],
+    scene_id: int = 1,
+    art_style: str | None = None,
+    scale: str = "any",
+) -> tuple[Scene, list[Character], dict[str, Asset], dict[str, Location]]:
+    """Generate the opening scene for the chosen scenario.
+
+    Args:
+        game_id: Unique identifier for the game (for image storage)
+        scenario_name: Name of the chosen scenario
+        scenario_details: Full markdown details about the scenario
+        characters: List of Character objects in the party (with full stats, inventory, backstory)
+        existing_assets: Dictionary of existing assets (NPCs/objects) for consistency
+        existing_locations: Dictionary of existing locations for consistency
+        scene_id: Scene identifier (default 1 for opening)
+
+    Returns:
+        Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
+    """
+
+    logger.info(f"Generating opening scene for: {scenario_name}")
+
+    # Build detailed character information for context
+    character_sheets = "\n\n".join(
+        [
+            f"**{char.name}**\n"
+            f"- Gender: {getattr(char, 'gender', 'unspecified')} (use matching pronouns)\n"
+            f"- Stats: Strength {char.strength}, Intelligence {char.intelligence}, Agility {char.agility}\n"
+            f"- Health: {char.current_health}/{char.maximum_health}\n"
+            f"- Backstory: {char.backstory}\n"
+            f"- Appearance: {char.appearance}\n"
+            f"- Personality: {char.personality}\n"
+            f"- Skills: {', '.join(char.skills) if char.skills else 'None'}\n"
+            f"- Inventory: {format_inventory(char.inventory)}"
+            for char in characters
+        ]
+    )
+
+    prompt = f"""
+You are a creative Dungeon Master for a D&D-style adventure.
+
+SCENARIO: {scenario_name}
+
+SCENARIO DETAILS:
+{scenario_details}
+{scene_scale_section(scale)}
+PARTY CHARACTER SHEETS:
+{character_sheets}
+
+{format_existing_assets(existing_assets)}
+
+{format_existing_locations(existing_locations)}
+
+Generate the opening scene for this adventure. Create an engaging, atmospheric introduction that:
+
+CRITICAL FOR OPENING SCENE:
+1. **Ground how the party arrived HERE**: Before anything happens, establish how these characters
+   came to be at this exact place — their journey in, why they're passing through, or the ordinary
+   moment they are in as the scene opens. Use their backstories for natural connections (travelling
+   together, hired on, drawn by rumor, chance). 2-4 sentences of grounded on-ramp so the start feels
+   lived-in and earned, not dropped in cold.
+
+2. **Ease into the situation — do NOT cold-open with a quest-giver**: Avoid starting with an elder,
+   mayor, or official who immediately tells the party to go somewhere and do something — that feels
+   forced. Let the place and a natural moment draw them in first: something they notice, overhear,
+   stumble into, or are asked in passing. The hook should emerge from lived experience, not an
+   exposition dump.
+
+3. **Introduce the goal naturally and at the right pace**: Players don't know the scenario details,
+   so reveal the objective gradually through what they see and do — not a briefing. Give a reason to
+   care and a direction, but a smaller, closer hook first is good; let any larger stakes surface over
+   time rather than all at once.
+
+4. **Set the scene and mood**: Create atmosphere with vivid descriptions
+   - Describe the environment, sounds, smells, lighting
+   - Build tension or intrigue appropriate to the scenario
+
+5. **Introduce party members naturally**: Reference characters by name, appearance, and personality
+   - Show their personalities through brief actions or reactions
+   - Consider their backstories when describing how they interact
+   - Be aware of their stats, health, skills, and inventory
+
+6. **End with a clear hook**: Give players an immediate decision or action to take
+
+REMEMBER: This is the first thing players experience. They need to understand:
+- Who they are (as a group)
+- Where they are
+- What their goal/quest is
+- What they should do next
+
+{build_scene_generation_prompt_rules()}
+
+Make the scene immersive, clear, and exciting!
+"""
+
+    return await _run_scene(
+        prompt,
+        label="Opening",
+        game_id=game_id,
+        scene_id=scene_id,
+        scenario_name=scenario_name,
+        characters=characters,
+        existing_assets=existing_assets,
+        existing_locations=existing_locations,
+        art_style=art_style,
+    )
+
+
 async def generate_next_scene(
     game_id: str,
     scenario_name: str,
@@ -466,7 +497,6 @@ async def generate_next_scene(
     Returns:
         Tuple of (Scene object, Updated character list, Updated assets dictionary, Updated locations dictionary)
     """
-    agent = text_agent(GeneratedScene)
 
     next_id = last_scene_id + 1
     logger.info(f"Generating scene {next_id} for: {scenario_name}")
@@ -577,113 +607,14 @@ Generate the next scene in this adventure. The scene should:
 Continue the adventure!
 """
 
-    result = await retry_on_overload(agent.run, prompt)
-    generated = result.output
-
-    # Log generated scene details
-    logger.info(f"=== Next Scene Generated (Scene {next_id}) ===")
-    logger.info(
-        f"Generated scene model: {generated.model_dump_json(indent=2, exclude={'scene_text'})}"
+    return await _run_scene(
+        prompt,
+        label="Next",
+        game_id=game_id,
+        scene_id=next_id,
+        scenario_name=scenario_name,
+        characters=characters,
+        existing_assets=existing_assets,
+        existing_locations=existing_locations,
+        art_style=art_style,
     )
-
-    # Apply character updates from the scene
-    updated_characters = apply_character_updates(characters, generated)
-
-    # Process locations
-    updated_locations, processed_location_ref = _process_scene_location(
-        generated.location_reference,
-        existing_locations,
-    )
-
-    # Process assets and generate images in background thread (local backend).
-    # Acquire (and lazily load) the model off the event loop so the web server
-    # stays responsive during the one-time model load.
-    generator = await asyncio.to_thread(shared_image_generator)
-
-    asset_task = asyncio.to_thread(
-        _process_scene_assets,
-        game_id,
-        next_id,
-        generated.assets_present,
-        existing_assets,
-        generator,
-        art_style,
-    )
-
-    # Wait for asset processing to complete so we have asset images for scene generation
-    updated_assets, visible_asset_ids = await asset_task
-    if isinstance(updated_assets, Exception):
-        logger.error(f"Asset processing failed: {updated_assets}")
-        updated_assets = existing_assets
-        visible_asset_ids = []
-
-    # Reference only the art-directed in-frame subjects (reference isolation) so the
-    # image fits the beat and other figures don't copy a referenced character's look.
-    image_ref_ids, subject_directions = resolve_image_subject_ids(
-        generated.image_subjects, updated_assets, visible_asset_ids
-    )
-
-    # Generate scene image and voiceover in background threads (concurrently)
-    # Now we can include asset images in scene generation (generator acquired above)
-    image_task = asyncio.to_thread(
-        generate_scene_image_sync,
-        generator,
-        game_id,
-        next_id,
-        generated.scene_text,
-        generated.visual_description,
-        characters,
-        scenario_name,
-        generated.game_status,
-        updated_assets,
-        image_ref_ids,
-        art_style,
-        subject_directions,
-    )
-
-    voiceover_task = generate_scene_voiceover(
-        game_id,
-        next_id,
-        generated.scene_text,
-        updated_characters,
-        updated_assets,
-        generated.narration_segments,
-    )
-
-    # Wait for both to complete
-    image_file_path, voiceover_file_path = await asyncio.gather(
-        image_task, voiceover_task, return_exceptions=True
-    )
-
-    # Handle exceptions
-    if isinstance(image_file_path, BaseException):
-        logger.error(f"Image generation failed: {image_file_path}")
-        image_file_path = None
-    if isinstance(voiceover_file_path, BaseException):
-        logger.error(f"Voiceover generation failed: {voiceover_file_path}")
-        voiceover_file_path = None
-
-    # Convert to web paths if generated
-    image_web_path = None
-    if image_file_path:
-        image_web_path = f"/static/scenes/{game_id}/{image_file_path.name}"
-
-    voiceover_web_path = None
-    if voiceover_file_path:
-        voiceover_web_path = f"/static/voiceovers/{game_id}/{voiceover_file_path.name}"
-
-    scene = _make_scene(
-        next_id,
-        generated.scene_text,
-        generated.prompt,
-        image_web_path,
-        generated.game_status,
-        visible_asset_ids,
-        health_changes=generated.health_changes,
-        inventory_changes=generated.inventory_changes,
-        skill_changes=generated.skill_changes,
-        stat_changes=generated.stat_changes,
-    )
-    scene.voiceover_path = voiceover_web_path
-    scene.location_reference = processed_location_ref
-    return scene, updated_characters, updated_assets, updated_locations
