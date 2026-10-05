@@ -8,27 +8,6 @@
       "severity": "error"
     },
     {
-      "column": 32,
-      "path": "core/generator.py",
-      "name": "bad-function-definition",
-      "concise_description": "Default `None` is not assignable to parameter `assets` with type `dict[str, Asset]`",
-      "severity": "error"
-    },
-    {
-      "column": 36,
-      "path": "core/generator.py",
-      "name": "bad-function-definition",
-      "concise_description": "Default `None` is not assignable to parameter `visible_asset_ids` with type `list[str]`",
-      "severity": "error"
-    },
-    {
-      "column": 40,
-      "path": "core/generator.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Path | None` is not assignable to parameter `*args` with type `PathLike[str] | str` in function `pathlib.Path.__new__`",
-      "severity": "error"
-    },
-    {
       "column": 22,
       "path": "core/generator.py",
       "name": "bad-argument-type",
@@ -215,6 +194,27 @@
       "path": "core/llm.py",
       "name": "not-a-type",
       "concise_description": "Expected a type form, got instance of `(iterable: Iterable[object], /) -> bool`",
+      "severity": "error"
+    },
+    {
+      "column": 32,
+      "path": "core/media.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `assets` with type `dict[str, Asset]`",
+      "severity": "error"
+    },
+    {
+      "column": 36,
+      "path": "core/media.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `visible_asset_ids` with type `list[str]`",
+      "severity": "error"
+    },
+    {
+      "column": 40,
+      "path": "core/media.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | None` is not assignable to parameter `*args` with type `PathLike[str] | str` in function `pathlib.Path.__new__`",
       "severity": "error"
     },
     {

@@ -34,8 +34,8 @@ async def test_one_failed_portrait_does_not_sink_the_party(
         return concept.name, path
 
     monkeypatch.setattr(generator, "IMAGE_DIR", tmp_path)
-    monkeypatch.setattr(generator, "_get_image_generator", lambda: object())
-    monkeypatch.setattr(generator, "_generate_character_image_sync", render)
+    monkeypatch.setattr(generator, "shared_image_generator", lambda: object())
+    monkeypatch.setattr(generator, "generate_character_image_sync", render)
 
     party = await generator.generate_characters(
         "g1", "The Frozen Pass", num_characters=2

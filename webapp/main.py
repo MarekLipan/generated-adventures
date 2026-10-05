@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from nicegui import app as nicegui_app
 from nicegui import ui
 
-from core import generator
+from core import media
 from webapp.services import game_flow
 
 from .components.resume import resume_game
@@ -66,7 +66,7 @@ async def _warm_up_models() -> None:
     """
     _install_benign_error_filter()
     logger.info("Warming up generation models in the background...")
-    asyncio.create_task(asyncio.to_thread(generator.warm_up_models))
+    asyncio.create_task(asyncio.to_thread(media.warm_up_models))
 
 
 @ui.page("/")
