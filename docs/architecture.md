@@ -73,6 +73,147 @@ sequenceDiagram
 The LLM answers in a structured format (a pydantic model), not free text, so stat
 changes, inventory changes and art direction arrive as data the engine can apply.
 
+## Data model
+
+What a saved game is made of. Everything here is a pydantic model in
+`core/models.py`, and a game is saved as one JSON document.
+
+```mermaid
+classDiagram
+    direction LR
+    class Game {
+        id
+        players
+        art_style
+        player_actions
+    }
+    class ScenarioTemplate {
+        name
+        genre
+        scale
+        one_liner
+        dm_notes
+        times_played
+    }
+    class Character {
+        name
+        strength, intelligence, agility
+        current_health, maximum_health
+        backstory, appearance, personality
+        skills
+        image_path
+        assigned_voice
+    }
+    class InventoryItem {
+        name
+        purpose
+    }
+    class Scene {
+        id
+        text
+        image_path
+        voiceover_path
+        game_status
+        health, inventory, skill, stat changes
+    }
+    class PromptType {
+        type
+        prompt_text
+        options
+        target_character
+        dice_type
+    }
+    class Asset {
+        id
+        name
+        type
+        description
+        image_path
+        assigned_voice
+    }
+    class Location {
+        id
+        name
+        location_type
+        description
+        key_features
+        atmosphere
+    }
+    class LocationReference {
+        location_id
+        time_of_day
+        weather
+        camera_angle
+        focus_area
+    }
+
+    Game --> ScenarioTemplate : scenario_id
+    Game *-- "1..*" Character : party
+    Game *-- "*" Scene : story so far
+    Game *-- "*" Asset : NPCs and objects
+    Game *-- "*" Location : places
+    Character *-- "*" InventoryItem : inventory
+    Scene *-- "0..1" PromptType : what the players are asked
+    Scene *-- "0..1" LocationReference : where it happens
+    LocationReference ..> Location : location_id
+    Scene ..> Asset : visible_asset_ids
+```
+
+The scenario is stored separately so it can be replayed: `dm_notes` holds the
+hidden plot, which the LLM sees but players don't. Party members are also kept
+as assets, so scene renders can use their portraits as references the same way
+they use NPCs'.
+
+## Model backends
+
+Image and voice models sit behind two small interfaces, so the rest of the
+engine doesn't care which one runs. `IMAGE_PROVIDER` and `TTS_PROVIDER` pick the
+implementation, and `core/media.py` keeps one shared instance of each.
+
+```mermaid
+classDiagram
+    direction TB
+    class ImageGenerator {
+        <<abstract>>
+        generate_character_image(prompt, output_path, reference_images)
+        generate_scene_image(prompt, output_path, reference_images, subject_directions)
+    }
+    class FluxKleinImageGenerator {
+        FLUX.2 Klein on this machine
+        bitsandbytes on NVIDIA, GGUF on Apple Silicon
+        per-character compositing for group scenes
+    }
+    class GeminiImageGenerator {
+        Gemini API
+    }
+    class HttpImageGenerator {
+        sends requests to the local image server
+    }
+    class ImageServer {
+        image_server.py
+        keeps one backend loaded
+    }
+    class TTSGenerator {
+        <<abstract>>
+        synthesize(text, output_path)
+        synthesize_segments(segments, output_path)
+    }
+    class KokoroTTSGenerator {
+        Kokoro on the CPU
+    }
+    class GeminiTTSGenerator {
+        Gemini API
+    }
+
+    ImageGenerator <|-- FluxKleinImageGenerator
+    ImageGenerator <|-- GeminiImageGenerator
+    ImageGenerator <|-- HttpImageGenerator
+    HttpImageGenerator ..> ImageServer : HTTP
+    ImageServer --> FluxKleinImageGenerator : hosts
+    TTSGenerator <|-- KokoroTTSGenerator
+    TTSGenerator <|-- GeminiTTSGenerator
+```
+
 ## Module guide
 
 All code lives in `src/generated_adventures/`.

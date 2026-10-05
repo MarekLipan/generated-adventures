@@ -1,11 +1,13 @@
 # Running FLUX.2 Klein on a 32 GB Mac
 
 The game renders a portrait per hero and an illustration per scene with FLUX.2
-Klein 9B. On an NVIDIA GPU that takes seconds. On an M1 Max with 32 GB of unified
-memory it first took **8 to 10 minutes per image**, and got slower the longer the
+Klein 9B. On an NVIDIA GPU that takes seconds. On an Apple Silicon Mac with 32 GB of
+unified memory it first took **8 to 10 minutes per image**, and got slower the longer the
 game ran. This page shows how that went to about two minutes.
 
-All measurements: M1 Max, 32 GB, PyTorch on Metal (MPS), 4 denoising steps.
+All measurements: an Apple Silicon Mac with 32 GB of unified memory, PyTorch on
+Metal (MPS), 4 denoising steps. Absolute times vary by chip; the ratios are the
+point.
 
 ## The problem: 34 GB of weights in 32 GB of memory
 

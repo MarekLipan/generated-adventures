@@ -141,7 +141,7 @@ class Settings(BaseSettings):
     # Run the per-subject inpaint passes on MPS too. Off by default: on a 32 GB
     # Mac the base pass leaves the MPS pool near its cap, so building the inpaint
     # pipeline (from_pipe) runs out of memory and every multi-subject scene paid
-    # for a doomed attempt before falling back. Measured on an M1 Max: base pass
+    # for a doomed attempt before falling back. Measured on a 32 GB Mac: base pass
     # ~190 s, so each extra pass would roughly add that again. With this off, MPS
     # still renders the slot-pinned base pass (subjects placed left->right per
     # their directions), just without per-subject repainting. CUDA is unaffected.

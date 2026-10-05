@@ -10,7 +10,7 @@ voice for each character.
 
 ![Two heroes fighting a stone golem in a torchlit dungeon](docs/images/party-scene.jpg)
 
-*A two-character scene rendered locally with FLUX.2 Klein on an M1 Max. Each hero
+*A two-character scene rendered locally with FLUX.2 Klein on an Apple Silicon Mac. Each hero
 keeps the face and gear from their portrait.*
 
 ## Features
@@ -41,7 +41,9 @@ Text comes from Gemini (or any OpenAI-compatible server, such as Ollama). Images
 come from FLUX.2 Klein running locally, or from Gemini. Narration comes from
 Kokoro running locally, or from Gemini.
 
-See [docs/architecture.md](docs/architecture.md) for diagrams and a module guide.
+**Architecture:** [docs/architecture.md](docs/architecture.md) has diagrams of the
+components, one game turn, the data model and the model backends, plus a module
+guide.
 
 ## Getting started
 
@@ -99,12 +101,12 @@ Time per image with FLUX.2 Klein 9B (4 steps):
 
 | Hardware | Setup | Portrait | Scene |
 |---|---|---|---|
-| NVIDIA RTX 3080, 10 GB | bitsandbytes NF4 | about 12–20 s | about 12–20 s |
-| Apple M1 Max, 32 GB | GGUF Q2_K transformer | about 2 min | about 4 min |
+| NVIDIA GPU, 10 GB VRAM | bitsandbytes NF4 | about 12–20 s | about 12–20 s |
+| Apple Silicon Mac, 32 GB | GGUF Q2_K transformer | about 2 min | about 4 min |
 
-The RTX 3080 figure comes from the project's development notes. The M1 Max
-figures come from `scripts/benchmark_images.py`, which reproduces them on your
-own hardware.
+The NVIDIA figures come from the project's development notes and the Mac figures
+from `scripts/benchmark_images.py`; times vary with the exact GPU or chip. Run
+the script to measure your own hardware.
 
 ## Development
 

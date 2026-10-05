@@ -269,7 +269,7 @@ class FluxKleinImageGenerator(ImageGenerator):
     Memory strategy (both the 9B transformer and Qwen3-8B text encoder are large):
     - On CUDA, quantize BOTH modules with bitsandbytes (FLUX_KLEIN_QUANTIZATION,
       default "nf4") so model-level CPU offload keeps the active module resident
-      — ~12-20 s/image on a 10 GB RTX 3080 at bf16-equivalent quality.
+      — ~12-20 s/image on a 10 GB card at bf16-equivalent quality.
     - Otherwise (MPS, or bitsandbytes unavailable) fall back to a bf16 pipeline
       with model-level offload where a module fits, else sequential offload.
     """
