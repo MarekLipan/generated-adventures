@@ -22,7 +22,6 @@ from core.models import (
 )
 
 # Where uploaded player photos are stored (served at /static/photos/...).
-PHOTO_DIR = pathlib.Path("webapp/static/photos")
 
 # --- Scenario management ----------------------------------------------------------
 
@@ -162,10 +161,10 @@ def save_player_photo(
 ) -> pathlib.Path:
     """Persist an uploaded player photo and return its file path.
 
-    Stored under webapp/static/photos/<game_id>/player_<index>.<ext> so it is
+    Stored under <media>/photos/<game_id>/player_<index>.<ext> so it is
     both usable as a generation reference and servable to the UI.
     """
-    game_photo_dir = PHOTO_DIR / game_id
+    game_photo_dir = media.PHOTO_DIR / game_id
     game_photo_dir.mkdir(parents=True, exist_ok=True)
     ext = suffix if suffix.startswith(".") else f".{suffix}"
     photo_path = game_photo_dir / f"player_{player_index}{ext}"

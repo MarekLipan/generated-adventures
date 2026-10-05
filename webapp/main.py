@@ -25,8 +25,14 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Mount static files directory for character images
-static_dir = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+# Generated media (portraits, scenes, narration). Saved games store URLs under
+# /static, so the media folder is served there; the app's own CSS lives at /ui.
+app.mount(
+    media.MEDIA_URL_PREFIX, StaticFiles(directory=str(media.MEDIA_DIR)), name="media"
+)
+app.mount(
+    "/ui", StaticFiles(directory=str(Path(__file__).parent / "static")), name="ui"
+)
 
 
 def _install_benign_error_filter() -> None:
@@ -76,7 +82,7 @@ async def _warm_up_models() -> None:
 def main_page():
     """Defines the user interface shell and delegates flow to component functions."""
     # Add custom CSS
-    ui.add_head_html('<link rel="stylesheet" href="/static/css/fantasy-theme.css">')
+    ui.add_head_html('<link rel="stylesheet" href="/ui/css/fantasy-theme.css">')
     ui.add_head_html(
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'

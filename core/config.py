@@ -1,5 +1,6 @@
 """Application configuration management."""
 
+import pathlib
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Application configuration settings."""
+
+    # Where saves and generated media (portraits, scenes, narration) are kept.
+    # A relative path resolves against the working directory.
+    DATA_DIR: pathlib.Path = pathlib.Path("data")
 
     # Hugging Face token for downloading gated models (e.g. FLUX.2 Klein).
     HUGGING_FACE_HUB_TOKEN: str = ""

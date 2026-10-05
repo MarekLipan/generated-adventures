@@ -24,12 +24,24 @@ from .tts_backends import TTSGenerator, get_tts_generator
 logger = logging.getLogger(__name__)
 
 
-IMAGE_DIR = pathlib.Path("webapp/static/characters")
+# Generated media lives under DATA_DIR. Saved games store URLs such as
+# /static/scenes/<game>/<file>, so the web app serves MEDIA_DIR at that prefix.
+MEDIA_DIR = settings.DATA_DIR / "media"
+MEDIA_URL_PREFIX = "/static"
+ASSET_DIR = MEDIA_DIR / "assets"
+PHOTO_DIR = MEDIA_DIR / "photos"
+
+IMAGE_DIR = MEDIA_DIR / "characters"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-SCENE_IMAGE_DIR = pathlib.Path("webapp/static/scenes")
+SCENE_IMAGE_DIR = MEDIA_DIR / "scenes"
 SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def media_path(url: str) -> pathlib.Path:
+    """The file behind a media URL such as /static/scenes/<game>/<file>."""
+    return MEDIA_DIR / url.removeprefix(MEDIA_URL_PREFIX).lstrip("/")
 
 
 # Lazy initialization of image generator to avoid loading models at import.
@@ -92,7 +104,7 @@ def _shared_tts_generator() -> TTSGenerator | None:
     return _tts_generator  # type: ignore[return-value]
 
 
-VOICEOVER_DIR = pathlib.Path("webapp/static/voiceovers")
+VOICEOVER_DIR = MEDIA_DIR / "voiceovers"
 VOICEOVER_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -190,7 +202,7 @@ def _prioritize_scene_references(
         asset = assets.get(aid)
         if not asset or not asset.image_path:
             continue
-        ref_file = pathlib.Path("webapp") / asset.image_path.lstrip("/")
+        ref_file = media_path(asset.image_path)
         if not ref_file.exists():
             logger.warning(f"Reference image not found, skipping: {ref_file}")
             continue
@@ -510,7 +522,7 @@ def generate_asset_image_sync(
         Path to the saved image file, or None if generation failed
     """
     # Create asset directory for this game
-    asset_dir = pathlib.Path(f"webapp/static/assets/{game_id}")
+    asset_dir = ASSET_DIR / game_id
     asset_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = (

@@ -2,7 +2,6 @@
 
 import html
 import io
-from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -18,6 +17,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from core.media import media_path
 from core.models import Character
 
 
@@ -73,7 +73,7 @@ def generate_character_sheet_pdf(character: Character, game_id: str = None) -> b
     left_content = []
     if character.image_path:
         try:
-            image_path = Path("webapp") / character.image_path.lstrip("/")
+            image_path = media_path(character.image_path)
             if image_path.exists():
                 img = Image(str(image_path), width=1.8 * inch, height=2.25 * inch)
                 left_content.append(img)
@@ -277,7 +277,7 @@ def _build_character_content(character: Character, game_id: str = None) -> list:
     # Character Image
     if character.image_path:
         try:
-            image_path = Path("webapp") / character.image_path.lstrip("/")
+            image_path = media_path(character.image_path)
             if image_path.exists():
                 img = Image(str(image_path), width=2 * inch, height=2.5 * inch)
                 story.append(img)

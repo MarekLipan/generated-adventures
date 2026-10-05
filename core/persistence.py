@@ -8,12 +8,13 @@ Stores scenario templates as JSON files in the data/scenarios/templates director
 import json
 import pathlib
 
+from .config import settings
 from .models import Game, ScenarioTemplate
 
-GAMES_DIR = pathlib.Path("data/games")
+GAMES_DIR = settings.DATA_DIR / "games"
 GAMES_DIR.mkdir(parents=True, exist_ok=True)
 
-SCENARIOS_DIR = pathlib.Path("data/scenarios/templates")
+SCENARIOS_DIR = settings.DATA_DIR / "scenarios" / "templates"
 SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
 
 

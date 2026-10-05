@@ -2,12 +2,12 @@
 
 import asyncio
 import logging
-import pathlib
 
 from ..character_updates import apply_character_updates, format_inventory
 from ..image_backends import ImageGenerator
 from ..llm import retry_on_overload, text_agent
 from ..media import (
+    ASSET_DIR,
     generate_asset_image_sync,
     generate_scene_image_sync,
     generate_scene_voiceover,
@@ -102,7 +102,7 @@ def _process_scene_assets(
     visible_asset_ids = []
 
     # Create asset directory if it doesn't exist
-    asset_dir = pathlib.Path(f"webapp/static/assets/{game_id}")
+    asset_dir = ASSET_DIR / game_id
     asset_dir.mkdir(parents=True, exist_ok=True)
 
     for asset_ref in assets_present:
