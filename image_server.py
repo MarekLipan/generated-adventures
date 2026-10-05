@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local image-generation inference service.
 
-Loads a local image backend (FLUX.2 Klein / FLUX.1 Kontext) ONCE at startup,
+Loads the local image backend (FLUX.2 Klein) ONCE at startup,
 keeps it warm in GPU memory, and serves generation over HTTP. The game (or any
 device on the same LAN) becomes a thin client via IMAGE_PROVIDER="http".
 

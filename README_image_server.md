@@ -1,6 +1,6 @@
 # Image Inference Server
 
-Runs the image model (FLUX.2 Klein / FLUX.1 Kontext) as a standalone HTTP service
+Runs the image model (FLUX.2 Klein) as a standalone HTTP service
 that loads the model **once**, keeps it warm on the GPU, and serves generation on
 request. The game becomes a thin client, so it holds no model and no GPU — and any
 device on the same network can use the same endpoint.

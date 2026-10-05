@@ -8,11 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration settings."""
 
-    # Hugging Face token for downloading gated models (e.g. FLUX.1-Kontext-dev).
+    # Hugging Face token for downloading gated models (e.g. FLUX.2 Klein).
     HUGGING_FACE_HUB_TOKEN: str = ""
 
-    # Optional for local flux-kontext runs; required only when IMAGE_PROVIDER=gemini
-    # or LLM_PROVIDER=gemini.
+    # Required when LLM_PROVIDER, IMAGE_PROVIDER or TTS_PROVIDER is "gemini".
     GOOGLE_API_KEY: str = ""
 
     # ── Text LLM (story / scene generation) ─────────────────────────────────────
@@ -31,19 +30,17 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = "ollama"
 
     # Image generation backend configuration
-    # - "flux-kontext":    FREE, fully local. FLUX.1 Kontext [dev] 12B. Single stitched
-    #                      reference image for multi-character scenes. 30 steps.
     # - "flux-klein":      FREE, fully local. FLUX.2 Klein [9B or 4B]. Native list of
     #                      reference images — no stitching. 9B distilled runs in 4 steps.
     # - "gemini":          Cloud API (requires GOOGLE_API_KEY).
     # - "http":            Remote inference service (this app's image_server.py) that
     #                      keeps a model warm and runs generation over HTTP. The game
     #                      becomes a thin client — see IMAGE_SERVER_URL below.
-    IMAGE_PROVIDER: Literal["flux-kontext", "flux-klein", "gemini", "http"] = "flux-kontext"
+    IMAGE_PROVIDER: Literal["flux-klein", "gemini", "http"] = "flux-klein"
 
     # Privacy guardrail: never upload reference images (including players' profile
     # photos) to a CLOUD image backend unless explicitly enabled. Local backends
-    # (flux-kontext / flux-klein) run on-device and are unaffected. When False
+    # (flux-klein) run on-device and are unaffected. When False
     # (default), the Gemini image backend generates text-to-image only and drops
     # any reference photos, so player photos never leave the machine by accident.
     ALLOW_CLOUD_IMAGE_UPLOAD: bool = False
@@ -62,36 +59,16 @@ class Settings(BaseSettings):
     # a model for the very first time.
     IMAGE_HF_OFFLINE: bool = True
 
-    # FLUX Kontext settings (for flux-kontext backend)
-    # Open-weights image model with native character/object consistency.
-    FLUX_KONTEXT_MODEL: str = "black-forest-labs/FLUX.1-Kontext-dev"
-    # Embedded guidance scale for Kontext (BFL recommends ~2.5).
-    FLUX_KONTEXT_GUIDANCE_SCALE: float = 2.5
-    # Offload model weights to CPU layer-by-layer to fit in less VRAM/RAM.
-    # Slower but lets the 12B model run on machines with limited memory.
-    # Recommended True on Macs / GPUs with < 24GB.
+    # Let the bfloat16 Klein pipeline offload weights to CPU when it does not fit
+    # in VRAM / unified memory. Slower, but avoids out-of-memory. The CUDA
+    # bitsandbytes and GGUF paths manage placement themselves.
     IMAGE_ENABLE_CPU_OFFLOAD: bool = True
 
     # Device configuration (auto, cuda, mps, cpu)
     IMAGE_DEVICE: str = "auto"  # auto will choose mps for Mac, cuda for NVIDIA
 
-    # GGUF pre-quantized models (recommended over runtime quantization).
-    # Format: "repo_id:filename" — files are resolved from the HuggingFace cache.
-    # When both are set, GGUF loading is used and IMAGE_QUANTIZATION is ignored.
-    # Transformer Q8_0 (~12.7 GB) + T5 Q5_K_M (~3.4 GB) = ~20 GB total,
-    # fits in 32 GB unified memory with no CPU offload.
-    FLUX_KONTEXT_GGUF_TRANSFORMER: str = ""
-    FLUX_KONTEXT_GGUF_T5: str = ""
-
-    # Runtime quantization via optimum-quanto (fallback when GGUF is not set).
-    # - "none":  bfloat16 full precision (~24 GB) — requires sequential CPU offload on 32 GB Mac
-    # - "int8":  8-bit weights (~12 GB)  — fits in 32 GB without any CPU offload
-    # - "int4":  4-bit weights (~6 GB)   — fits easily, some quality loss
-    # Requires: pip install optimum-quanto
-    IMAGE_QUANTIZATION: Literal["none", "int8", "int4"] = "none"
-
     # FLUX.2 Klein settings (for flux-klein backend)
-    # Distilled successor to FLUX.1 Kontext with native multi-image reference support.
+    # Distilled model with native multi-image reference support.
     # 9B distilled: 4 steps, guidance ~3.5. 4B base: ~50 steps, guidance ~3.5.
     FLUX_KLEIN_MODEL: str = "black-forest-labs/FLUX.2-klein-9B"
     FLUX_KLEIN_GUIDANCE_SCALE: float = 3.5
@@ -108,12 +85,13 @@ class Settings(BaseSettings):
     # - "nf4":  4-bit NormalFloat (~5.3 GB transformer, ~4.5 GB encoder) — recommended.
     # - "int8": 8-bit (higher fidelity, ~9.5 GB transformer — tighter on 10 GB cards).
     # - "none": full bfloat16 (uses sequential CPU offload on small cards).
-    # NOTE: on-the-fly GGUF and optimum-quanto are NOT used here — both are far
-    # slower or crash on the current torch/CUDA build; bitsandbytes has fast kernels.
+    # NOTE: on CUDA, on-the-fly GGUF and optimum-quanto are far slower or crash on
+    # the current torch/CUDA build; bitsandbytes has fast kernels. GGUF is the MPS
+    # path instead (see FLUX_KLEIN_GGUF_TRANSFORMER).
     FLUX_KLEIN_QUANTIZATION: Literal["none", "nf4", "int8"] = "nf4"
 
     # Pre-quantized GGUF transformer for Klein, as "repo_id:filename".
-    # Format matches FLUX_KONTEXT_GGUF_TRANSFORMER above.
+    # The file is resolved from the Hugging Face cache (see IMAGE_HF_OFFLINE).
     #
     # This is the MPS answer to what bitsandbytes does on CUDA. A bf16 Klein is
     # ~17 GB transformer + ~15 GB Qwen3-8B encoder = ~32 GB, which does not fit
@@ -189,11 +167,8 @@ class Settings(BaseSettings):
     FLUX_KLEIN_MPS_PORTRAIT_WIDTH: int = 576
     FLUX_KLEIN_MPS_PORTRAIT_HEIGHT: int = 768
 
-    # Generation parameters
-    IMAGE_NUM_INFERENCE_STEPS: int = 30  # Used by flux-kontext backend
-
     # ── Remote inference service (image_server.py) ──────────────────────────────
-    # The server loads a local backend (flux-klein/flux-kontext) once, keeps it warm,
+    # The server loads the local backend (flux-klein) once, keeps it warm,
     # and serves generation over HTTP. Run it with:
     #     uv run python image_server.py
     # The server reads IMAGE_PROVIDER to decide which local backend to host, so set

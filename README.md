@@ -1,72 +1,38 @@
 # generated-adventures
 A Python app for generating short D&D like adventures with generated story, voice narration and imagery using Multimodal LLMs.
 
-## Image Generation Backends
+## Image generation
 
-This project supports **two image generation backends** with easy switching via environment variables:
+Images come from **FLUX.2 Klein** running locally, or from Gemini in the cloud.
+Choose with `IMAGE_PROVIDER` in `.env` (start from `.env.example`):
 
-- **🖥️ FLUX.1 Kontext [dev]** (default): Local, free, supports reference images for character consistency
-- **🌐 Google Gemini**: Cloud-based, supports reference images for character consistency
+| Provider | Runs on | Notes |
+|---|---|---|
+| `flux-klein` (default) | Your NVIDIA GPU or Apple Silicon | Free. Takes multiple reference images natively, so characters stay consistent across scenes. |
+| `gemini` | Google's API | No GPU needed, but image generation requires a billing-enabled key. |
+| `http` | Another machine running `image_server.py` | Lets a laptop use a desktop GPU over the LAN. See [README_image_server.md](README_image_server.md). |
 
-### Quick Start
+**First run with `flux-klein`:** the model (~32 GB) is gated on Hugging Face.
+Accept its license on the [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B),
+set `HUGGING_FACE_HUB_TOKEN`, and set `IMAGE_HF_OFFLINE=false` until the download
+finishes. After that the app loads it from the local cache without network access.
 
-#### Using Gemini (Cloud API)
-```bash
-# .env file
-IMAGE_PROVIDER=gemini
-GOOGLE_API_KEY=your_api_key_here
-```
+### Hardware
 
-#### Using FLUX.1 Kontext [dev] (Local - Free, Default)
-```bash
-# 1. Install local image generation dependencies
-uv pip install -e ".[local-image]"
+- **NVIDIA GPU:** nothing to configure. Klein loads with bitsandbytes NF4
+  quantization, about 12–20 s per image on a 10 GB RTX 3080.
+- **Apple Silicon (32 GB):** set `FLUX_KLEIN_GGUF_TRANSFORMER` as shown in
+  `.env.example`. It loads a 4 GB quantized transformer so the whole pipeline fits
+  in memory: about 2 minutes per image on an M1 Max, versus about 9 without it.
 
-# 2. Configure .env
-IMAGE_PROVIDER=flux-kontext
-FLUX_KONTEXT_MODEL=black-forest-labs/FLUX.1-Kontext-dev
-FLUX_KONTEXT_GUIDANCE_SCALE=2.5
-IMAGE_ENABLE_CPU_OFFLOAD=true
-IMAGE_DEVICE=auto  # auto, mps (Mac), cuda (NVIDIA), cpu
-IMAGE_NUM_INFERENCE_STEPS=30  # Lower=faster, Higher=better quality
-
-# 3. First run will download ~24GB model (one-time)
-```
-
-**⚠️ Note**: FLUX.1 Kontext [dev] requires accepting the model license on Hugging Face and logging in with `huggingface-cli login` before first use.
-
-### Performance Notes
-
-**Mac (Apple Silicon)**:
-- FLUX.1 Kontext [dev]: ~2-4 min/image (M1/M2 with 16GB RAM, CPU offload enabled)
-- Uses Metal Performance Shaders (MPS) automatically
-
-**NVIDIA GPU**:
-- FLUX.1 Kontext [dev]: ~30-90 sec/image (RTX 3080+)
-- Requires CUDA support
-
-**CPU Only** (not recommended):
-- Very slow, 10-20 min/image
-
-### Character Consistency
-
-**Reference Image Support** (maintains character appearance across scenes):
-- ✅ **FLUX.1 Kontext [dev]**: Local and free
-- ✅ **Gemini**: Cloud-based, costs per image
-
-For best results:
-- **Character portraits**: FLUX.1 Kontext [dev]
-- **Scene images with character consistency**: FLUX.1 Kontext [dev] (local) or Gemini (cloud)
-
-### Testing Image Quality
-
-Use the included test script to preview image quality before generating full adventures:
+### Checking speed and quality
 
 ```bash
-python test_image_generation.py
+uv run python scripts/benchmark_images.py
 ```
 
-This will generate sample character portraits and scenes using your configured backend, helping you compare quality and choose the best option for your needs.
+Renders portraits, a one-character scene and a multi-character scene with your
+configured backend, and prints how long each step took. Output goes to `test_images/`.
 
 ### How to Run
 1. `uv run uvicorn webapp.main:app --reload` for playing the game.

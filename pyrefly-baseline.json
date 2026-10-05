@@ -134,20 +134,6 @@
       "severity": "error"
     },
     {
-      "column": 34,
-      "path": "core/image_backends.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `transformer`",
-      "severity": "error"
-    },
-    {
-      "column": 32,
-      "path": "core/image_backends.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `transformer`",
-      "severity": "error"
-    },
-    {
       "column": 17,
       "path": "core/image_backends.py",
       "name": "missing-attribute",
@@ -197,31 +183,10 @@
       "severity": "error"
     },
     {
-      "column": 21,
-      "path": "core/image_backends.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `vae`",
-      "severity": "error"
-    },
-    {
-      "column": 21,
-      "path": "core/image_backends.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `vae`",
-      "severity": "error"
-    },
-    {
       "column": 23,
       "path": "core/image_backends.py",
       "name": "not-callable",
       "concise_description": "Expected a callable, got `None`",
-      "severity": "error"
-    },
-    {
-      "column": 12,
-      "path": "core/image_backends.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `dict` has no attribute `in_channels`",
       "severity": "error"
     },
     {
@@ -232,24 +197,10 @@
       "severity": "error"
     },
     {
-      "column": 35,
-      "path": "core/image_backends.py",
-      "name": "bad-assignment",
-      "concise_description": "`Image` is not assignable to dict key `image` with type `Generator | float | int | str`",
-      "severity": "error"
-    },
-    {
       "column": 25,
       "path": "core/image_backends.py",
       "name": "not-callable",
       "concise_description": "Expected a callable, got `None`",
-      "severity": "error"
-    },
-    {
-      "column": 71,
-      "path": "core/image_backends.py",
-      "name": "missing-attribute",
-      "concise_description": "No attribute `LANCZOS` in module `PIL.Image`",
       "severity": "error"
     },
     {
@@ -355,104 +306,6 @@
       "path": "core/image_backends.py",
       "name": "not-callable",
       "concise_description": "Expected a callable, got `None`",
-      "severity": "error"
-    },
-    {
-      "column": 9,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `TextIO` has no attribute `reconfigure`",
-      "severity": "error"
-    },
-    {
-      "column": 79,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "No attribute `LANCZOS` in module `PIL.Image`",
-      "severity": "error"
-    },
-    {
-      "column": 30,
-      "path": "scripts/image_quality_check.py",
-      "name": "bad-assignment",
-      "concise_description": "`Path | str` is not assignable to `Path`",
-      "severity": "error"
-    },
-    {
-      "column": 20,
-      "path": "scripts/image_quality_check.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Path | str` is not assignable to parameter `prompt` with type `str` in function `core.image_backends.ImageGenerator.generate_character_image`",
-      "severity": "error"
-    },
-    {
-      "column": 16,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `str` has no attribute `exists`",
-      "severity": "error"
-    },
-    {
-      "column": 23,
-      "path": "scripts/image_quality_check.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `list[Path | str]` is not assignable to parameter `portrait_paths` with type `list[Path]` in function `_build_party_grid`",
-      "severity": "error"
-    },
-    {
-      "column": 16,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `str` has no attribute `exists`",
-      "severity": "error"
-    },
-    {
-      "column": 40,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `str` has no attribute `name`",
-      "severity": "error"
-    },
-    {
-      "column": 26,
-      "path": "scripts/image_quality_check.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `list[Path | str]` is not assignable to parameter `reference_images` with type `list[Path] | None` in function `core.image_backends.ImageGenerator.generate_scene_image`",
-      "severity": "error"
-    },
-    {
-      "column": 52,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `str` has no attribute `name`",
-      "severity": "error"
-    },
-    {
-      "column": 52,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `str` has no attribute `name`",
-      "severity": "error"
-    },
-    {
-      "column": 16,
-      "path": "scripts/image_quality_check.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Path | str` is not assignable to parameter `prompt` with type `str` in function `core.image_backends.FluxKleinImageGenerator.generate_character_image`",
-      "severity": "error"
-    },
-    {
-      "column": 58,
-      "path": "scripts/image_quality_check.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `Path` has no attribute `split`",
-      "severity": "error"
-    },
-    {
-      "column": 24,
-      "path": "scripts/image_quality_check.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Path | str` is not assignable to parameter `prompt` with type `str` in function `core.image_backends.FluxKleinImageGenerator.generate_character_image`",
       "severity": "error"
     },
     {

@@ -48,8 +48,6 @@ if not logger.hasHandlers():
     handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
     logger.addHandler(handler)
 
-# NOTE: google.generativeai high-level configure may not export consistently in current lib version; using provider-based auth only.
-
 IMAGE_DIR = pathlib.Path("webapp/static/characters")
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -250,7 +248,7 @@ def _generate_character_image_sync(
         f"Agility {concept.agility}"
     )
 
-    # Art style is injected by the image backend (FluxKontextImageGenerator.GAME_ART_STYLE)
+    # Art style is injected by the image backend (ImageGenerator._style_suffix)
     # so it applies uniformly to every image type. Do not add style keywords here.
 
     prompt_img = " ".join(prompt_parts)
