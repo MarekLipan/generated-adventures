@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pathlib
 
-from core import game, generator, persistence
+from core import game, generator, persistence, prompts
 from core.models import (
     Character,
     Game,
@@ -32,12 +32,12 @@ async def get_scenario_pool() -> list[ScenarioTemplate]:
 
 def scenario_theme_options() -> dict[str, str]:
     """{key: label} genre choices for the scenario picker."""
-    return generator.scenario_theme_options()
+    return prompts.scenario_theme_options()
 
 
 def scenario_scale_options() -> dict[str, str]:
     """{key: label} stakes/scale choices for the scenario picker."""
-    return generator.scenario_scale_options()
+    return prompts.scenario_scale_options()
 
 
 async def generate_new_scenario(

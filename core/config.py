@@ -215,12 +215,12 @@ class Settings(BaseSettings):
     GEMINI_TTS_VOICE: str = "Algieba"
 
     # Default genre for the "Generate New Scenario" picker. One of the keys in
-    # core.generator.SCENARIO_THEMES ("classic_fantasy", "dark_fantasy",
+    # core.prompts.SCENARIO_THEMES ("classic_fantasy", "dark_fantasy",
     # "mystery_intrigue", "any"). Defaults to classic sword-and-sorcery fantasy;
     # pick "any" in the UI for maximal variety on a given generation.
     SCENARIO_DEFAULT_THEME: str = "classic_fantasy"
 
-    # Default stakes/scale for the scenario picker: one of core.generator.SCENARIO_SCALES
+    # Default stakes/scale for the scenario picker: one of core.prompts.SCENARIO_SCALES
     # ("grounded", "heroic", "epic", "any"). Defaults to grounded/local — aspiring
     # adventurers on human-sized problems — so not every adventure is world-ending;
     # pick a bigger scale (or "any") in the UI per generation.
