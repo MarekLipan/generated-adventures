@@ -7,7 +7,6 @@ Stores scenario templates as JSON files in the data/scenarios/templates director
 
 import json
 import pathlib
-from typing import List, Optional
 
 from .models import Game, ScenarioTemplate
 
@@ -30,19 +29,19 @@ def save_game(game: Game) -> None:
         json.dump(game.model_dump(), f, indent=2)
 
 
-def load_game(game_id: str) -> Optional[Game]:
+def load_game(game_id: str) -> Game | None:
     """Load a game state from disk. Returns None if not found."""
     file_path = _game_file_path(game_id)
     if not file_path.exists():
         return None
 
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         data = json.load(f)
 
     return Game.model_validate(data)
 
 
-def list_saved_games() -> List[tuple[str, str, str]]:
+def list_saved_games() -> list[tuple[str, str, str]]:
     """Return list of (game_id, scenario_name, summary) for all saved games.
 
     Returns tuples of (game_id, scenario_name or 'Unknown', brief summary).
@@ -51,7 +50,7 @@ def list_saved_games() -> List[tuple[str, str, str]]:
     games = []
     for game_file in GAMES_DIR.glob("*.json"):
         try:
-            with open(game_file, "r") as f:
+            with open(game_file) as f:
                 data = json.load(f)
 
             game_id = data.get("id", game_file.stem)
@@ -109,24 +108,24 @@ def save_scenario_template(scenario: ScenarioTemplate) -> None:
         json.dump(data, f, indent=2)
 
 
-def load_scenario_template(scenario_id: str) -> Optional[ScenarioTemplate]:
+def load_scenario_template(scenario_id: str) -> ScenarioTemplate | None:
     """Load a scenario template from disk. Returns None if not found."""
     file_path = _scenario_file_path(scenario_id)
     if not file_path.exists():
         return None
 
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         data = json.load(f)
 
     return ScenarioTemplate.model_validate(data)
 
 
-def load_all_scenario_templates() -> List[ScenarioTemplate]:
+def load_all_scenario_templates() -> list[ScenarioTemplate]:
     """Load all scenario templates from disk, sorted by creation date (newest first)."""
     scenarios = []
     for scenario_file in SCENARIOS_DIR.glob("*.json"):
         try:
-            with open(scenario_file, "r") as f:
+            with open(scenario_file) as f:
                 data = json.load(f)
             scenario = ScenarioTemplate.model_validate(data)
             scenarios.append(scenario)

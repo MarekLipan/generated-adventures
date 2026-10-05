@@ -16,7 +16,6 @@ import pathlib
 import re
 import wave
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from .config import settings
 
@@ -89,7 +88,7 @@ class TTSGenerator(ABC):
     @abstractmethod
     def synthesize(
         self, text: str, output_path: pathlib.Path
-    ) -> Optional[pathlib.Path]:
+    ) -> pathlib.Path | None:
         """Synthesize narration for `text` and save a WAV to `output_path`.
 
         Returns the path on success, or None on failure.
@@ -98,7 +97,7 @@ class TTSGenerator(ABC):
 
     def synthesize_segments(
         self, segments: list, output_path: pathlib.Path
-    ) -> Optional[pathlib.Path]:
+    ) -> pathlib.Path | None:
         """Synthesize an ordered list of (voice_id, text) segments to one WAV.
 
         Default (single-voice) implementation ignores the per-segment voices and
@@ -134,7 +133,7 @@ class KokoroTTSGenerator(TTSGenerator):
 
     def synthesize(
         self, text: str, output_path: pathlib.Path
-    ) -> Optional[pathlib.Path]:
+    ) -> pathlib.Path | None:
         try:
             clean = _clean_for_tts(text)
             if not clean:
@@ -155,7 +154,7 @@ class KokoroTTSGenerator(TTSGenerator):
 
     def synthesize_segments(
         self, segments: list, output_path: pathlib.Path
-    ) -> Optional[pathlib.Path]:
+    ) -> pathlib.Path | None:
         """Render each (voice_id, text) segment in its own voice (single natural
         pass) and concatenate, with a pause at each speaker change."""
         import numpy as np
@@ -205,7 +204,7 @@ class GeminiTTSGenerator(TTSGenerator):
 
     def synthesize(
         self, text: str, output_path: pathlib.Path
-    ) -> Optional[pathlib.Path]:
+    ) -> pathlib.Path | None:
         from google.genai import types as genai_types  # type: ignore
 
         narration_prompt = f"""You are an expert fantasy audiobook narrator and Dungeon Master bringing an adventure to life.
@@ -265,7 +264,7 @@ SCENE TO NARRATE:
             return None
 
 
-def get_tts_generator() -> Optional[TTSGenerator]:
+def get_tts_generator() -> TTSGenerator | None:
     """Factory: build the configured TTS backend, or None if disabled.
 
     Returns None when TTS_PROVIDER="none" or when a backend can't initialize

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from typing import List
 
 from nicegui import ui
 
@@ -16,7 +15,7 @@ async def show_characters(
     main_container,
     game_id: str,
     scenario_name: str,
-    cached_characters: List[Character] | None = None,
+    cached_characters: list[Character] | None = None,
 ):
     logger.info(f"show_characters called for game {game_id}, scenario: {scenario_name}")
     game_state = game_flow.get_game_state(game_id)
@@ -42,7 +41,7 @@ async def show_characters(
             scenario_details = scenario.dm_notes if scenario else None
 
             logger.info("Starting character generation with scenario context...")
-            all_characters: List[Character] = await game_flow.generate_characters(
+            all_characters: list[Character] = await game_flow.generate_characters(
                 game_id=game_id,
                 scenario_name=scenario_name,
                 num_characters=6,
@@ -168,7 +167,7 @@ async def select_character(
     game_id: str,
     scenario_name: str,
     character: Character,
-    all_characters: List[Character],
+    all_characters: list[Character],
 ):
     logger.info(f"Character selected: {character.name}")
     game_flow.add_character(game_id, character)

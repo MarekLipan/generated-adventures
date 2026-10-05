@@ -84,8 +84,11 @@ addopts = "-m 'not live'"
 target-version = "py313"
 
 [tool.ruff.lint]
-# Ruff's defaults: real errors only (undefined names, unused imports, syntax).
-select = ["E4", "E7", "E9", "F"]
+select = [
+    "E4", "E7", "E9", "F",  # ruff's defaults: real errors (undefined names, syntax)
+    "I",                    # import sorting
+    "UP",                   # modern syntax for the target Python version
+]
 
 [tool.pyrefly]
 project-includes = ["core", "webapp", "tests", "scripts", "image_server.py"]

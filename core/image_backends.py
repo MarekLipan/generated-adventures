@@ -5,7 +5,6 @@ import logging
 import pathlib
 import threading
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 from PIL import Image
 
@@ -52,7 +51,7 @@ ART_STYLES: dict[str, str] = {
 DEFAULT_ART_STYLE = "painterly_hero"
 
 
-def resolve_art_style(art_style: Optional[str]) -> Optional[str]:
+def resolve_art_style(art_style: str | None) -> str | None:
     """Map an art-style key to its prompt suffix.
 
     Returns the suffix string for a known key, or None if `art_style` is None or
@@ -64,8 +63,8 @@ def resolve_art_style(art_style: Optional[str]) -> Optional[str]:
 
 
 def _filter_cloud_references(
-    reference_images: Optional[List[pathlib.Path]],
-) -> List[pathlib.Path]:
+    reference_images: list[pathlib.Path] | None,
+) -> list[pathlib.Path]:
     """Drop reference images before sending them to a CLOUD backend, unless allowed.
 
     Player profile photos are sensitive; when ALLOW_CLOUD_IMAGE_UPLOAD is False
@@ -115,7 +114,7 @@ def _load_portrait_reference(path: pathlib.Path, max_side: int = 1024) -> "Image
 class ImageGenerator(ABC):
     """Abstract base class for image generation backends."""
 
-    def _style_suffix(self, art_style: Optional[str]) -> str:
+    def _style_suffix(self, art_style: str | None) -> str:
         """Resolve the style suffix to append to prompts for a given style key.
 
         Falls back to this backend's default GAME_ART_STYLE when the key is None
@@ -132,9 +131,9 @@ class ImageGenerator(ABC):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+    ) -> pathlib.Path | None:
         """Generate a character portrait image.
 
         Args:
@@ -155,10 +154,10 @@ class ImageGenerator(ABC):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-        subject_directions: Optional[List[str]] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+        subject_directions: list[str] | None = None,
+    ) -> pathlib.Path | None:
         """Generate a scene image with optional character references.
 
         Args:
@@ -186,9 +185,9 @@ class GeminiImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+    ) -> pathlib.Path | None:
         """Generate character image using Gemini."""
         try:
             from google.genai import types as genai_types  # type: ignore
@@ -233,10 +232,10 @@ class GeminiImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-        subject_directions: Optional[List[str]] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+        subject_directions: list[str] | None = None,
+    ) -> pathlib.Path | None:
         """Generate scene image with Gemini (supports reference images)."""
         from google.genai import types as genai_config  # type: ignore
         from google.genai import types as genai_types  # type: ignore
@@ -658,7 +657,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             settings.FLUX_KLEIN_PORTRAIT_HEIGHT,
         )
 
-    def _device_vram_gb(self) -> Optional[float]:
+    def _device_vram_gb(self) -> float | None:
         """Total VRAM of the active accelerator in GB, or None if unknown.
 
         Used to decide between model-level and sequential CPU offload. MPS shares
@@ -678,9 +677,9 @@ class FluxKleinImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+    ) -> pathlib.Path | None:
         """Generate a character portrait.
 
         With a reference image (e.g. a player's profile photo), Klein keeps the
@@ -776,7 +775,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             return None
 
     @staticmethod
-    def _subject_regions(n: int, width: int, height: int) -> List[tuple]:
+    def _subject_regions(n: int, width: int, height: int) -> list[tuple]:
         """Split the frame into n side-by-side subject regions (left→right).
 
         Regions overlap slightly and leave headroom/footroom so a repainted figure
@@ -794,7 +793,7 @@ class FluxKleinImageGenerator(ImageGenerator):
         return regions
 
     @staticmethod
-    def _slot_names(n: int) -> List[str]:
+    def _slot_names(n: int) -> list[str]:
         """Human position labels for the left→right subject slots."""
         if n == 1:
             return ["center"]
@@ -808,8 +807,8 @@ class FluxKleinImageGenerator(ImageGenerator):
         self,
         prompt: str,
         suffix: str,
-        refs: List["Image.Image"],
-        subject_directions: Optional[List[str]] = None,
+        refs: list["Image.Image"],
+        subject_directions: list[str] | None = None,
     ):
         """Render a scene, then repaint each subject with only their own reference.
 
@@ -914,10 +913,10 @@ class FluxKleinImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-        subject_directions: Optional[List[str]] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+        subject_directions: list[str] | None = None,
+    ) -> pathlib.Path | None:
         try:
             suffix = self._style_suffix(art_style)
             scene_w, scene_h = self._scene_size()
@@ -1040,7 +1039,7 @@ class HttpImageGenerator(ImageGenerator):
         self.headers = {"X-API-Key": api_key} if api_key else {}
         logger.info(f"Using remote image server at {self.base_url}")
 
-    def _post(self, path: str, *, data: dict, files=None) -> Optional[bytes]:
+    def _post(self, path: str, *, data: dict, files=None) -> bytes | None:
         try:
             resp = self._httpx.post(
                 f"{self.base_url}{path}",
@@ -1063,9 +1062,9 @@ class HttpImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+    ) -> pathlib.Path | None:
         data = {"prompt": prompt}
         if art_style:
             data["art_style"] = art_style
@@ -1102,10 +1101,10 @@ class HttpImageGenerator(ImageGenerator):
         self,
         prompt: str,
         output_path: pathlib.Path,
-        reference_images: Optional[List[pathlib.Path]] = None,
-        art_style: Optional[str] = None,
-        subject_directions: Optional[List[str]] = None,
-    ) -> Optional[pathlib.Path]:
+        reference_images: list[pathlib.Path] | None = None,
+        art_style: str | None = None,
+        subject_directions: list[str] | None = None,
+    ) -> pathlib.Path | None:
         data = {"prompt": prompt}
         if art_style:
             data["art_style"] = art_style

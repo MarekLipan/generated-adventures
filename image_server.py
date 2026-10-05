@@ -26,7 +26,6 @@ import logging
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Optional
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -41,7 +40,7 @@ logger = logging.getLogger("image_server")
 STATE: dict = {"generator": None, "lock": None}
 
 
-def _check_api_key(x_api_key: Optional[str]) -> None:
+def _check_api_key(x_api_key: str | None) -> None:
     """Enforce the shared secret if one is configured."""
     expected = settings.IMAGE_SERVER_API_KEY
     if expected and x_api_key != expected:
@@ -108,9 +107,9 @@ async def _run_generation(call) -> bytes:
 @app.post("/generate/character")
 async def generate_character(
     prompt: str = Form(...),
-    art_style: Optional[str] = Form(default=None),
-    photo: Optional[UploadFile] = File(default=None),
-    x_api_key: Optional[str] = Header(default=None),
+    art_style: str | None = Form(default=None),
+    photo: UploadFile | None = File(default=None),
+    x_api_key: str | None = Header(default=None),
 ):
     _check_api_key(x_api_key)
     gen = STATE["generator"]
@@ -118,7 +117,7 @@ async def generate_character(
     # An optional profile photo drives the hero's likeness; persist it so the
     # backend (which takes file paths) can use it as a reference.
     with tempfile.TemporaryDirectory() as td:
-        refs: Optional[List[Path]] = None
+        refs: list[Path] | None = None
         if photo is not None:
             data = await photo.read()
             if data:
@@ -137,16 +136,16 @@ async def generate_character(
 @app.post("/generate/scene")
 async def generate_scene(
     prompt: str = Form(...),
-    art_style: Optional[str] = Form(default=None),
-    references: List[UploadFile] = File(default=[]),
-    x_api_key: Optional[str] = Header(default=None),
+    art_style: str | None = Form(default=None),
+    references: list[UploadFile] = File(default=[]),
+    x_api_key: str | None = Header(default=None),
 ):
     _check_api_key(x_api_key)
     gen = STATE["generator"]
 
     # Persist uploaded reference images to a temp dir; the backend takes file paths.
     with tempfile.TemporaryDirectory() as td:
-        ref_paths: List[Path] = []
+        ref_paths: list[Path] = []
         for i, uf in enumerate(references or []):
             data = await uf.read()
             if not data:

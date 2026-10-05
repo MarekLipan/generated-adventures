@@ -10,16 +10,16 @@ import logging
 import pathlib
 import re
 import threading
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 from google.genai.errors import ClientError, ServerError  # type: ignore
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
+from . import voice_casting
 from .config import settings
 from .image_backends import ImageGenerator, get_image_generator
-from .tts_backends import TTSGenerator, get_tts_generator
 from .models import (
     Asset,
     Character,
@@ -39,7 +39,7 @@ from .models import (
     Scene,
     SceneSummary,
 )
-from . import voice_casting
+from .tts_backends import TTSGenerator, get_tts_generator
 
 logger = logging.getLogger()  # Use root logger so Uvicorn/NiceGUI picks up logs
 logger.setLevel(logging.INFO)
@@ -56,7 +56,7 @@ SCENE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Lazy initialization of image generator to avoid loading models at import.
 # A lock guards the one-time load so concurrent first-callers don't load twice.
-_image_generator: Optional[ImageGenerator] = None
+_image_generator: ImageGenerator | None = None
 _image_generator_lock = threading.Lock()
 
 
@@ -140,7 +140,7 @@ _UNSET = object()
 _tts_generator: object = _UNSET
 
 
-def _get_tts_generator() -> Optional[TTSGenerator]:
+def _get_tts_generator() -> TTSGenerator | None:
     """Get or initialize the TTS generator singleton (None if unavailable)."""
     global _tts_generator
     if _tts_generator is _UNSET:
@@ -274,9 +274,9 @@ def _generate_character_image_sync(
 
 def _prioritize_scene_references(
     assets: dict[str, Asset],
-    visible_asset_ids: List[str],
+    visible_asset_ids: list[str],
     max_refs: int,
-) -> tuple[List[pathlib.Path], list, list, List[str]]:
+) -> tuple[list[pathlib.Path], list, list, list[str]]:
     """Choose which visible assets become scene image references, best-first, capped.
 
     Klein downsizes ALL references together to fit VRAM, so a crowded reference
@@ -324,10 +324,10 @@ def _prioritize_scene_references(
 
 
 def _resolve_image_subject_ids(
-    image_subjects: Optional[list],
+    image_subjects: list | None,
     assets: dict[str, Asset],
-    visible_asset_ids: List[str],
-) -> tuple[List[str], dict[str, str]]:
+    visible_asset_ids: list[str],
+) -> tuple[list[str], dict[str, str]]:
     """Resolve art-directed in-frame subjects to (asset ids, {asset_id: direction}).
 
     The direction map lets the renderer bind each reference portrait to what that
@@ -342,7 +342,7 @@ def _resolve_image_subject_ids(
     """
     if image_subjects is None:
         return visible_asset_ids, {}
-    ids: List[str] = []
+    ids: list[str] = []
     directions: dict[str, str] = {}
     for subject in image_subjects:
         name = (getattr(subject, "name", None) or str(subject)).strip()
@@ -370,13 +370,13 @@ def _generate_scene_image_sync(
     scene_id: int,
     scene_text: str,
     visual_description: str,
-    characters: List[Character],
+    characters: list[Character],
     scenario_name: str,
     game_status: GameStatus = "ongoing",
     assets: dict[str, Asset] = None,
-    visible_asset_ids: List[str] = None,
-    art_style: Optional[str] = None,
-    subject_directions: Optional[dict[str, str]] = None,
+    visible_asset_ids: list[str] = None,
+    art_style: str | None = None,
+    subject_directions: dict[str, str] | None = None,
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
 
@@ -415,8 +415,8 @@ def _generate_scene_image_sync(
     # Collect reference images for character/asset consistency — prioritized and
     # capped so each surviving reference renders at a higher resolution (Klein
     # scales all references down together to fit VRAM).
-    reference_images: List[pathlib.Path] = []
-    aligned_directions: List[str] = []
+    reference_images: list[pathlib.Path] = []
+    aligned_directions: list[str] = []
     if assets and visible_asset_ids:
         reference_images, kept, dropped, kept_ids = _prioritize_scene_references(
             assets, visible_asset_ids, settings.IMAGE_MAX_SCENE_REFERENCES
@@ -459,8 +459,8 @@ def _generate_scene_image_sync(
 
 
 def _resolve_segment_voices(
-    narration_segments: List["NarrationSegment"],
-    characters: List[Character],
+    narration_segments: list["NarrationSegment"],
+    characters: list[Character],
     assets: dict[str, Asset],
 ) -> list:
     """Map narration segments to (voice_id, text), casting/persisting NPC voices.
@@ -520,9 +520,9 @@ async def _generate_scene_voiceover(
     game_id: str,
     scene_id: int,
     scene_text: str,
-    characters: List[Character],
+    characters: list[Character],
     assets: dict[str, Asset],
-    narration_segments: Optional[List["NarrationSegment"]] = None,
+    narration_segments: list["NarrationSegment"] | None = None,
 ) -> pathlib.Path | None:
     """Generate scene narration via the configured TTS backend.
 
@@ -574,8 +574,8 @@ async def generate_characters(
     game_id: str,
     scenario_name: str,
     num_characters: int = 6,
-    scenario_details: Optional[str] = None,
-) -> List[Character]:
+    scenario_details: str | None = None,
+) -> list[Character]:
     """Generates a list of characters with stats and portraits for a given scenario.
 
     Args:
@@ -630,7 +630,7 @@ Skills should match the character's background, stats, and archetype.
     generator = await asyncio.to_thread(_get_image_generator)
 
     # Step 3: Generate images asynchronously (in thread pool to avoid blocking event loop)
-    final_characters: List[Character] = []
+    final_characters: list[Character] = []
 
     # Generate all images concurrently using asyncio.to_thread
     image_tasks = [
@@ -682,7 +682,7 @@ Skills should match the character's background, stats, and archetype.
     return final_characters
 
 
-def _setting_only(dm_notes: Optional[str]) -> str:
+def _setting_only(dm_notes: str | None) -> str:
     """Extract just the non-spoiler '## The Setting' section from DM notes.
 
     DM notes are assembled as '## The Setting … ## The Plot … ## Main Quest …
@@ -699,10 +699,10 @@ def _setting_only(dm_notes: Optional[str]) -> str:
 
 async def generate_archetypes(
     scenario_name: str,
-    scenario_details: Optional[str] = None,
+    scenario_details: str | None = None,
     num_archetypes: int = 5,
     scale: str = "any",
-) -> List[GeneratedArchetype]:
+) -> list[GeneratedArchetype]:
     """Generate scenario-tailored hero archetypes for players to choose from.
 
     This is a cheap text-only call. Portraits and full lore are only generated
@@ -845,7 +845,7 @@ def _generate_hero_portrait_sync(
     hero_name: str,
     archetype: GeneratedArchetype,
     art_style: str,
-    photo_path: Optional[pathlib.Path],
+    photo_path: pathlib.Path | None,
     game_dir: pathlib.Path,
     idx: int,
     scale: str = "any",
@@ -872,12 +872,12 @@ def _generate_hero_portrait_sync(
 
 async def _generate_hero_lore(
     scenario_name: str,
-    scenario_details: Optional[str],
+    scenario_details: str | None,
     archetype: GeneratedArchetype,
     has_photo: bool,
-    custom_name: Optional[str] = None,
+    custom_name: str | None = None,
     gender: str = "unspecified",
-    avoid_names: Optional[List[str]] = None,
+    avoid_names: list[str] | None = None,
     scale: str = "any",
 ) -> GeneratedCharacter:
     """Generate stats + lore for a single hero fitted to scenario and archetype."""
@@ -975,14 +975,14 @@ Make the hero distinctive, memorable, and a natural fit for both the archetype a
 async def generate_hero(
     game_id: str,
     scenario_name: str,
-    scenario_details: Optional[str],
+    scenario_details: str | None,
     archetype: GeneratedArchetype,
     art_style: str,
     player_index: int,
-    photo_path: Optional[pathlib.Path] = None,
-    custom_name: Optional[str] = None,
+    photo_path: pathlib.Path | None = None,
+    custom_name: str | None = None,
     gender: str = "unspecified",
-    avoid_names: Optional[List[str]] = None,
+    avoid_names: list[str] | None = None,
     scale: str = "any",
 ) -> Character:
     """Generate a single hero (lore + portrait) from a chosen archetype.
@@ -1189,7 +1189,7 @@ def scenario_theme_options() -> dict[str, str]:
     return {key: label for key, (label, _steer) in SCENARIO_THEMES.items()}
 
 
-def _avoid_names_section(avoid_names: Optional[List[str]], header: str) -> str:
+def _avoid_names_section(avoid_names: list[str] | None, header: str) -> str:
     """Format an 'already-used names, do not reuse' instruction, or '' if none."""
     names = sorted({n.strip() for n in (avoid_names or []) if n and n.strip()})
     if not names:
@@ -1199,10 +1199,10 @@ def _avoid_names_section(avoid_names: Optional[List[str]], header: str) -> str:
 
 
 async def generate_scenario_template(
-    existing_scenarios: List[ScenarioTemplate],
+    existing_scenarios: list[ScenarioTemplate],
     theme: str = "any",
     scale: str = "any",
-    avoid_names: Optional[List[str]] = None,
+    avoid_names: list[str] | None = None,
 ) -> ScenarioTemplate:
     """Generates a complete new scenario template with contrastive prompting.
 
@@ -1382,7 +1382,7 @@ Make it playable, fun, and full of opportunities for player choice and creativit
 
 async def generate_initial_locations(
     scenario_name: str,
-    scenario_details: Optional[str] = None,
+    scenario_details: str | None = None,
 ) -> dict[str, Location]:
     """Generates initial set of locations for the adventure.
 
@@ -1499,7 +1499,7 @@ def _npc_names_match(a: str, b: str) -> bool:
     return bool(ta) and ta == tb
 
 
-def _resolve_char(name: str, char_dict: dict) -> Optional[Character]:
+def _resolve_char(name: str, char_dict: dict) -> Character | None:
     """Find the character a change refers to, tolerating name variations."""
     if name in char_dict:
         return char_dict[name]
@@ -1526,8 +1526,8 @@ def _format_inventory(items) -> str:
 
 
 def _apply_character_updates(
-    characters: List[Character], generated_scene
-) -> List[Character]:
+    characters: list[Character], generated_scene
+) -> list[Character]:
     """Apply character state updates from explicit changes in the generated scene.
 
     Args:
@@ -1678,11 +1678,11 @@ def _make_scene(
     prompt,
     image_path: str | None = None,
     game_status: GameStatus = "ongoing",
-    visible_asset_ids: List[str] = None,
-    health_changes: List = None,
-    inventory_changes: List = None,
-    skill_changes: List = None,
-    stat_changes: List = None,
+    visible_asset_ids: list[str] = None,
+    health_changes: list = None,
+    inventory_changes: list = None,
+    skill_changes: list = None,
+    stat_changes: list = None,
 ) -> Scene:
     """Helper to create a Scene object from generated data.
 
@@ -1788,8 +1788,8 @@ def _process_scene_assets(
     assets_present: list,
     existing_assets: dict[str, Asset],
     generator: ImageGenerator,
-    art_style: Optional[str] = None,
-) -> tuple[dict[str, Asset], List[str]]:
+    art_style: str | None = None,
+) -> tuple[dict[str, Asset], list[str]]:
     """Process assets from generated scene, create new ones, and generate images.
 
     Args:
@@ -1894,9 +1894,9 @@ def _process_scene_assets(
 
 
 def _process_scene_location(
-    location_reference: Optional[LocationReference],
+    location_reference: LocationReference | None,
     existing_locations: dict[str, Location],
-) -> tuple[dict[str, Location], Optional[LocationReference]]:
+) -> tuple[dict[str, Location], LocationReference | None]:
     """Process location from generated scene and create new location if needed.
 
     Args:
@@ -1934,7 +1934,7 @@ def _generate_asset_image_sync(
     asset_id: str,
     asset_name: str,
     asset_description: str,
-    art_style: Optional[str] = None,
+    art_style: str | None = None,
 ) -> pathlib.Path | None:
     """Generate and save an image for an asset (NPC or object) via the local backend.
 
@@ -2501,13 +2501,13 @@ async def generate_opening_scene(
     game_id: str,
     scenario_name: str,
     scenario_details: str,
-    characters: List[Character],
+    characters: list[Character],
     existing_assets: dict[str, Asset],
     existing_locations: dict[str, Location],
     scene_id: int = 1,
-    art_style: Optional[str] = None,
+    art_style: str | None = None,
     scale: str = "any",
-) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
+) -> tuple[Scene, list[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the opening scene for the chosen scenario.
 
     Args:
@@ -2715,15 +2715,15 @@ async def generate_next_scene(
     game_id: str,
     scenario_name: str,
     scenario_details: str,
-    characters: List[Character],
+    characters: list[Character],
     last_scene_id: int,
-    player_action: Optional[str],
-    conversation_history: List[dict],
+    player_action: str | None,
+    conversation_history: list[dict],
     existing_assets: dict[str, Asset],
     existing_locations: dict[str, Location],
-    art_style: Optional[str] = None,
+    art_style: str | None = None,
     scale: str = "any",
-) -> tuple[Scene, List[Character], dict[str, Asset], dict[str, Location]]:
+) -> tuple[Scene, list[Character], dict[str, Asset], dict[str, Location]]:
     """Generate the next scene based on the story so far and player action.
 
     Args:
@@ -2966,8 +2966,8 @@ Continue the adventure!
 async def generate_scene_recap(
     game_id: str,
     scenario_name: str,
-    scenes: List[Scene],
-    characters: List[Character],
+    scenes: list[Scene],
+    characters: list[Character],
     current_scene_index: int,
 ) -> RecapResponse:
     """Generate a narrative recap with per-scene summaries.

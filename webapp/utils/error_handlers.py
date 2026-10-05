@@ -1,7 +1,7 @@
 """Utility functions for handling API errors in the UI."""
 
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from nicegui import ui
 
@@ -13,7 +13,7 @@ def show_api_error(
     error: Exception,
     title: str = "Error",
     message: str = "An error occurred",
-    retry_callback: Optional[Callable] = None,
+    retry_callback: Callable | None = None,
 ):
     """Display a user-friendly error message in the UI.
 
@@ -68,7 +68,7 @@ async def with_loading_and_error_handling(
     loading_message: str = "Please wait...",
     error_title: str = "Error",
     error_message: str = "An error occurred",
-    retry_func: Optional[Callable] = None,
+    retry_func: Callable | None = None,
 ):
     """Execute an async function with loading indicator and error handling.
 

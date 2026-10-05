@@ -7,7 +7,6 @@ scene-based story by calling the generator.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from . import generator, persistence
 from .models import Asset, Character, Game, ScenarioTemplate, Scene
@@ -24,7 +23,7 @@ def create_new_game(players: int) -> str:
     return new_game.id
 
 
-def load_game(game_id: str) -> Optional[Game]:
+def load_game(game_id: str) -> Game | None:
     """Load a game from disk into memory. Returns the Game if found, None otherwise."""
     game = persistence.load_game(game_id)
     if game:
@@ -144,12 +143,12 @@ async def generate_opening_scene(game_id: str):
     persistence.save_game(game)
 
 
-def get_game_state(game_id: str) -> Optional[Game]:
+def get_game_state(game_id: str) -> Game | None:
     """Retrieves the current state of a game as a Pydantic object."""
     return games.get(game_id)
 
 
-def get_scenario_from_game(game_id: str) -> Optional[ScenarioTemplate]:
+def get_scenario_from_game(game_id: str) -> ScenarioTemplate | None:
     """Retrieves the scenario template for a game."""
     game = get_game_state(game_id)
     if not game or not game.scenario_id:
@@ -157,7 +156,7 @@ def get_scenario_from_game(game_id: str) -> Optional[ScenarioTemplate]:
     return persistence.load_scenario_template(game.scenario_id)
 
 
-def get_current_scene(game_id: str) -> Optional[Scene]:
+def get_current_scene(game_id: str) -> Scene | None:
     """Return the last scene in the game's scene list, if any."""
     game_state = get_game_state(game_id)
     if not game_state or not game_state.scenes:
@@ -165,7 +164,7 @@ def get_current_scene(game_id: str) -> Optional[Scene]:
     return game_state.scenes[-1]
 
 
-async def advance_scene(game_id: str, player_action: Optional[str]) -> Optional[Scene]:
+async def advance_scene(game_id: str, player_action: str | None) -> Scene | None:
     """Generate and append the next scene based on a player's action.
 
     Returns the newly-created Scene, or None on error.

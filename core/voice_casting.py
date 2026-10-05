@@ -12,7 +12,7 @@ English. `lang_for_voice` maps a voice to the phonemizer language it expects.
 """
 
 import hashlib
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 # Hand-picked English voices, excluding the default narrator (bm_lewis).
 # Curated to Kokoro's higher-graded voices only (grade in parens) — auditioning
@@ -56,8 +56,8 @@ def _stable_index(name: str, n: int) -> int:
 def cast_voice(
     name: str,
     gender: str,
-    taken: Optional[Iterable[str]] = None,
-    exclude: Optional[str] = None,
+    taken: Iterable[str] | None = None,
+    exclude: str | None = None,
 ) -> str:
     """Pick a stable, collision-avoiding voice for a speaker.
 

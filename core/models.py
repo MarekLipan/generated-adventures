@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
@@ -86,10 +86,10 @@ class Asset(BaseModel):
         ...,
         description="Physical description of the NPC or object for visual consistency",
     )
-    image_path: Optional[str] = Field(
+    image_path: str | None = Field(
         None, description="Path to the generated asset image"
     )
-    assigned_voice: Optional[str] = Field(
+    assigned_voice: str | None = Field(
         None,
         description="Kokoro voice id assigned to this NPC for narration, kept stable across scenes",
     )
@@ -116,7 +116,7 @@ class Location(BaseModel):
         ...,
         description="Extensive physical description of the location including architecture, layout, materials, scale",
     )
-    key_features: List[str] = Field(
+    key_features: list[str] = Field(
         default_factory=list,
         description="List of distinctive features (e.g., 'massive oak beams', 'crystal chandelier', 'ancient runes')",
     )
@@ -138,23 +138,23 @@ class LocationReference(BaseModel):
     """
 
     location_id: str = Field(..., description="ID of the Location being referenced")
-    time_of_day: Optional[str] = Field(
+    time_of_day: str | None = Field(
         None,
         description="Time of day variation (e.g., 'dawn', 'midday', 'dusk', 'night'). Provides context for lighting in visual_description.",
     )
-    weather: Optional[str] = Field(
+    weather: str | None = Field(
         None,
         description="Weather conditions if outdoor (e.g., 'clear', 'rainy', 'stormy', 'foggy', 'snowing'). Provides context for atmosphere in visual_description.",
     )
-    state_changes: List[str] = Field(
+    state_changes: list[str] = Field(
         default_factory=list,
         description="Specific changes to location state (e.g., 'tables overturned', 'doors broken', 'fire damage'). Context for visual_description.",
     )
-    camera_angle: Optional[str] = Field(
+    camera_angle: str | None = Field(
         None,
         description="Suggested camera perspective (e.g., 'wide establishing shot', 'close interior view', 'aerial view'). Suggestion for visual_description composition, not a strict requirement.",
     )
-    focus_area: Optional[str] = Field(
+    focus_area: str | None = Field(
         None,
         description="Specific area to emphasize (e.g., 'the bar area', 'the throne', 'the entrance'). Suggestion for visual_description focus, not a strict requirement.",
     )
@@ -176,7 +176,7 @@ class ScenarioTemplate(BaseModel):
         "",
         description="Stakes/scale key: 'grounded', 'heroic', 'epic', or '' (unspecified).",
     )
-    character_names: List[str] = Field(
+    character_names: list[str] = Field(
         default_factory=list,
         description="Named characters/NPCs/places this scenario uses, tracked so other scenarios "
         "don't reuse the same names.",
@@ -196,7 +196,7 @@ class ScenarioTemplate(BaseModel):
         default_factory=datetime.now,
         description="Timestamp when the scenario was generated",
     )
-    last_played_at: Optional[datetime] = Field(
+    last_played_at: datetime | None = Field(
         None, description="Timestamp when the scenario was last played"
     )
 
@@ -226,26 +226,26 @@ class Character(BaseModel):
     personality: str = Field(
         ..., description="Character's personality traits, mannerisms, and demeanor"
     )
-    skills: List[str] = Field(
+    skills: list[str] = Field(
         default_factory=list,
         description="List of skills and abilities the character possesses",
     )
-    inventory: List[InvItem] = Field(
+    inventory: list[InvItem] = Field(
         default_factory=list,
         description="Items the character carries, each with a name and a clear purpose",
     )
-    image_path: Optional[str] = Field(
+    image_path: str | None = Field(
         None, description="Path to the character's generated portrait"
     )
-    archetype: Optional[str] = Field(
+    archetype: str | None = Field(
         None,
         description="Name of the scenario archetype this hero was built from (e.g. 'The Infiltrator')",
     )
-    player_photo_path: Optional[str] = Field(
+    player_photo_path: str | None = Field(
         None,
         description="Path to the player's uploaded profile photo used to shape this hero's likeness, if any",
     )
-    assigned_voice: Optional[str] = Field(
+    assigned_voice: str | None = Field(
         None,
         description="Kokoro voice id assigned to this character for narrated dialogue, kept stable across scenes",
     )
@@ -259,21 +259,21 @@ class PromptType(BaseModel):
         description="Type of prompt: 'dialogue', 'action', 'dice_check', or 'party_choice' "
         "(a shared group decision offered as a few fixed options).",
     )
-    dice_type: Optional[DiceType] = Field(
+    dice_type: DiceType | None = Field(
         None,
         description="Type of dice to roll if type is 'dice_check': 'd6' or 'd10'. Always single die roll.",
     )
-    options: Optional[List[str]] = Field(
+    options: list[str] | None = Field(
         None,
         description="For type 'party_choice' ONLY: 2-4 short, distinct courses of action the whole "
         "party chooses between (e.g. ['Take the mountain pass', 'Follow the river road']). One is "
         "picked with a single click. Do NOT use for roleplay/dialogue — only genuine group forks.",
     )
-    target_character: Optional[str] = Field(
+    target_character: str | None = Field(
         None,
         description="Name of specific character being prompted. REQUIRED (not None) for single-character dice_check prompts. Can be used for dialogue/action to target a specific character. For multi-character prompts, use target_characters instead and set this to None.",
     )
-    target_characters: Optional[List[str]] = Field(
+    target_characters: list[str] | None = Field(
         None,
         description="List of character names for multi-character prompts (dice_check or action) where multiple specific characters act/roll simultaneously. When using this, set target_character to None.",
     )
@@ -322,20 +322,20 @@ class Scene(BaseModel):
     text: str = Field(
         ..., description="Text content of the scene, can be markdown formatted"
     )
-    prompt: Optional[PromptType] = Field(
+    prompt: PromptType | None = Field(
         None, description="Structured prompt data for player interaction"
     )
-    image_path: Optional[str] = Field(
+    image_path: str | None = Field(
         None, description="Path to an image representing the scene"
     )
-    voiceover_path: Optional[str] = Field(
+    voiceover_path: str | None = Field(
         None, description="Path to a voiceover file for the scene"
     )
-    visible_asset_ids: List[str] = Field(
+    visible_asset_ids: list[str] = Field(
         default_factory=list,
         description="List of asset IDs that are visible in this scene's image",
     )
-    location_reference: Optional[LocationReference] = Field(
+    location_reference: LocationReference | None = Field(
         None,
         description="Reference to the location where this scene takes place, with scene-specific variations",
     )
@@ -344,23 +344,23 @@ class Scene(BaseModel):
         description="Status of the game: 'ongoing', 'completed' (victory), or 'failed' (game over)",
     )
     # Character changes that occurred in THIS scene only
-    health_changes: List["CharacterHealthChange"] = Field(
+    health_changes: list["CharacterHealthChange"] = Field(
         default_factory=list,
         description="Health changes that occurred in this scene",
     )
-    inventory_changes: List["CharacterInventoryChange"] = Field(
+    inventory_changes: list["CharacterInventoryChange"] = Field(
         default_factory=list,
         description="Inventory changes that occurred in this scene",
     )
-    skill_changes: List["CharacterSkillChange"] = Field(
+    skill_changes: list["CharacterSkillChange"] = Field(
         default_factory=list,
         description="Skill changes that occurred in this scene",
     )
-    stat_changes: List["CharacterStatChange"] = Field(
+    stat_changes: list["CharacterStatChange"] = Field(
         default_factory=list,
         description="Stat changes that occurred in this scene",
     )
-    recap_text: Optional[str] = Field(
+    recap_text: str | None = Field(
         None,
         description="Cached AI-generated recap of all scenes up to and including this one",
     )
@@ -371,16 +371,16 @@ class Game(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     players: int = Field(..., description="Number of players in the game", ge=1)
-    scenario_id: Optional[str] = Field(
+    scenario_id: str | None = Field(
         None, description="ID of the ScenarioTemplate being played"
     )
     art_style: ArtStyle = Field(
         default="painterly_hero",
         description="Visual art style for all generated imagery in this game",
     )
-    characters: List[Character] = []
-    scenes: List[Scene] = []
-    player_actions: List[str] = []
+    characters: list[Character] = []
+    scenes: list[Scene] = []
+    player_actions: list[str] = []
     assets: dict[str, Asset] = Field(
         default_factory=dict,
         description="Dictionary mapping asset IDs to Asset objects for visual consistency tracking",
@@ -415,7 +415,7 @@ class GeneratedScenarioTemplate(BaseModel):
         ...,
         description="Key NPCs with short descriptions and relevance (2-4 paragraphs)",
     )
-    character_names: List[str] = Field(
+    character_names: list[str] = Field(
         default_factory=list,
         description="The full names of every named CHARACTER/NPC and notable PLACE you introduced in "
         "this scenario (setting, plot, quest, and NPCs). Used to stop names recurring across "
@@ -443,7 +443,7 @@ class NarrationSegment(BaseModel):
 class NarrationScript(BaseModel):
     """An ordered breakdown of a scene into voiced narration segments."""
 
-    segments: List[NarrationSegment] = Field(
+    segments: list[NarrationSegment] = Field(
         ...,
         description="The scene split into ordered segments, alternating between Narrator prose and character dialogue, covering the whole scene in reading order.",
     )
@@ -478,7 +478,7 @@ class GeneratedArchetype(BaseModel):
 class GeneratedArchetypeList(BaseModel):
     """A list of scenario-tailored archetypes for players to choose from."""
 
-    archetypes: List[GeneratedArchetype]
+    archetypes: list[GeneratedArchetype]
 
 
 class GeneratedCharacter(BaseModel):
@@ -506,11 +506,11 @@ class GeneratedCharacter(BaseModel):
         ...,
         description="A 2-3 sentence description of the character's personality, mannerisms, and how they interact with others",
     )
-    skills: List[str] = Field(
+    skills: list[str] = Field(
         ...,
         description="3-5 skills or abilities the character possesses (e.g., 'Lockpicking', 'Persuasion', 'Swordsmanship', 'Arcane Knowledge', 'Tracking')",
     )
-    inventory: List[InvItem] = Field(
+    inventory: list[InvItem] = Field(
         ...,
         description="3-4 starting items. Give each a PLAIN, non-cryptic name AND a one-sentence "
         "purpose making clear what it does and when the player would use it. Prefer a few "
@@ -522,7 +522,7 @@ class GeneratedCharacter(BaseModel):
 class GeneratedCharacterList(BaseModel):
     """Represents a list of generated characters."""
 
-    characters: List[GeneratedCharacter]
+    characters: list[GeneratedCharacter]
 
 
 class GeneratedLocation(BaseModel):
@@ -535,7 +535,7 @@ class GeneratedLocation(BaseModel):
     description: str = Field(
         ..., description="Extensive physical description of the location"
     )
-    key_features: List[str] = Field(..., description="List of 3-5 distinctive features")
+    key_features: list[str] = Field(..., description="List of 3-5 distinctive features")
     atmosphere: str = Field(..., description="General mood and atmosphere")
     lighting_default: str = Field(..., description="Default lighting conditions")
 
@@ -543,7 +543,7 @@ class GeneratedLocation(BaseModel):
 class GeneratedLocationList(BaseModel):
     """Represents a list of generated locations."""
 
-    locations: List[GeneratedLocation]
+    locations: list[GeneratedLocation]
 
 
 class CharacterHealthChange(BaseModel):
@@ -568,12 +568,12 @@ class CharacterInventoryChange(BaseModel):
     character_name: str = Field(
         ..., description="Name of the character whose inventory changed"
     )
-    items_added: List[InvItem] = Field(
+    items_added: list[InvItem] = Field(
         default_factory=list,
         description="Items gained in this scene, each with a name AND a one-sentence purpose "
         "(what it does / when to use it).",
     )
-    items_removed: List[str] = Field(
+    items_removed: list[str] = Field(
         default_factory=list,
         description="Names of items lost or consumed in this scene (e.g., ['Rope', 'Torch'])",
     )
@@ -585,11 +585,11 @@ class CharacterSkillChange(BaseModel):
     character_name: str = Field(
         ..., description="Name of the character whose skills changed"
     )
-    skills_learned: List[str] = Field(
+    skills_learned: list[str] = Field(
         default_factory=list,
         description="New skills learned in this scene (rare, e.g., ['Advanced Lockpicking'])",
     )
-    skills_lost: List[str] = Field(
+    skills_lost: list[str] = Field(
         default_factory=list,
         description="Skills lost in this scene (very rare, e.g., due to curse or amnesia)",
     )
@@ -660,7 +660,7 @@ class RecapResponse(BaseModel):
         ...,
         description="The overall narrative recap (200-300 words) summarizing the adventure so far in an engaging, DM-style narration.",
     )
-    scene_summaries: List[SceneSummary] = Field(
+    scene_summaries: list[SceneSummary] = Field(
         ...,
         description="One-sentence summaries for each scene, in order. Use concise, punchy language that captures the essence of each scene.",
     )
@@ -681,27 +681,27 @@ class GeneratedScene(BaseModel):
         ...,
         description="The prompt for player interaction following the scene",
     )
-    health_changes: List[CharacterHealthChange] = Field(
+    health_changes: list[CharacterHealthChange] = Field(
         default_factory=list,
         description="List of health changes that occurred in THIS scene only. Include an entry for each character whose health changed (damage or healing). Empty list if no health changes.",
     )
-    inventory_changes: List[CharacterInventoryChange] = Field(
+    inventory_changes: list[CharacterInventoryChange] = Field(
         default_factory=list,
         description="List of inventory changes that occurred in THIS scene only. Include an entry for each character who gained or lost items. Empty list if no inventory changes.",
     )
-    skill_changes: List[CharacterSkillChange] = Field(
+    skill_changes: list[CharacterSkillChange] = Field(
         default_factory=list,
         description="List of skill changes that occurred in THIS scene only (rare). Include an entry for each character who learned or lost skills. Empty list if no skill changes.",
     )
-    stat_changes: List[CharacterStatChange] = Field(
+    stat_changes: list[CharacterStatChange] = Field(
         default_factory=list,
         description="List of stat changes that occurred in THIS scene only (very rare). Include an entry for each character whose permanent stats changed due to curses, blessings, transformations, etc. Empty list if no stat changes.",
     )
-    assets_present: List[AssetReference] = Field(
+    assets_present: list[AssetReference] = Field(
         default_factory=list,
         description="List of important NPCs and objects present in this scene. Include any significant characters or items that should have consistent visual representation. MUST reuse existing asset names when referring to already-introduced NPCs/objects.",
     )
-    image_subjects: Optional[List[ImgSubject]] = Field(
+    image_subjects: list[ImgSubject] | None = Field(
         None,
         description="Art direction for the scene ILLUSTRATION: only the characters/NPCs/objects actually "
         "IN this one image's frame — a subset, chosen like a book illustrator framing the beat. For each, "
@@ -712,11 +712,11 @@ class GeneratedScene(BaseModel):
         "establishing shot with no figures. Only these subjects are drawn and only their reference "
         "portraits are used (which also stops figures copying each other's look). Omit/null only if unsure.",
     )
-    narration_segments: List[NarrationSegment] = Field(
+    narration_segments: list[NarrationSegment] = Field(
         default_factory=list,
         description="The scene_text broken into ordered voiced-narration segments for a multi-voice audiobook. Descriptive prose -> speaker 'Narrator'; each piece of direct speech -> speaker = the exact name of the character/NPC saying it (dialogue text WITHOUT surrounding quotation marks), with a gender tag. Cover the ENTIRE scene_text in reading order, preserving wording. Do not invent new content.",
     )
-    location_reference: Optional[LocationReference] = Field(
+    location_reference: LocationReference | None = Field(
         None,
         description="Reference to the location where this scene takes place. MUST reuse existing location ID if returning to a known location. The location context (including time_of_day, weather, state_changes, camera_angle, focus_area) provides input for the visual_description - incorporate these elements naturally when writing visual_description. Use variations to add diversity while maintaining location consistency.",
     )
