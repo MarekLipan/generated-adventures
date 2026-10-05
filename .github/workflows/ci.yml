@@ -26,6 +26,10 @@ jobs:
       - name: Format
         run: uv run ruff format --check .
 
+      # Architecture rules from [tool.importlinter] in pyproject.toml.
+      - name: Architecture
+        run: uv run lint-imports
+
       # Fails only on type errors not recorded in pyrefly-baseline.json.
       - name: Type check
         run: uv run pyrefly check

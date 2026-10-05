@@ -79,6 +79,7 @@ local-tts = [
     "kokoro-onnx>=0.4.0",
 ]
 dev = [
+    "import-linter>=2.15",
     "pyrefly>=1.3.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -115,3 +116,41 @@ preset = "default"
 # Errors present when type checking was adopted. CI fails only on errors that
 # are not in here; shrink it with `pyrefly check --prune-baseline` as you fix them.
 baseline = "pyrefly-baseline.json"
+
+# Architecture rules, checked in CI with `lint-imports`. docs/architecture.md
+# draws the same layers.
+[tool.importlinter]
+root_package = "generated_adventures"
+
+[[tool.importlinter.contracts]]
+name = "The game engine does not depend on the web UI"
+type = "forbidden"
+source_modules = ["generated_adventures.core"]
+forbidden_modules = ["generated_adventures.webapp"]
+
+[[tool.importlinter.contracts]]
+name = "UI components reach the engine through the service layer"
+type = "forbidden"
+source_modules = ["generated_adventures.webapp.components"]
+# Reading models and config directly is fine; everything else goes via game_flow.
+forbidden_modules = [
+    "generated_adventures.core.character_updates",
+    "generated_adventures.core.game",
+    "generated_adventures.core.generation",
+    "generated_adventures.core.image_backends",
+    "generated_adventures.core.llm",
+    "generated_adventures.core.media",
+    "generated_adventures.core.names",
+    "generated_adventures.core.persistence",
+    "generated_adventures.core.prompts",
+    "generated_adventures.core.tts_backends",
+    "generated_adventures.core.voice_casting",
+]
+# Components -> game_flow -> core is the intended path; only direct imports count.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Generation steps do not manage game state or saving"
+type = "forbidden"
+source_modules = ["generated_adventures.core.generation"]
+forbidden_modules = ["generated_adventures.core.game", "generated_adventures.core.persistence"]
