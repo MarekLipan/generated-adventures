@@ -220,3 +220,6 @@ test_images/
 # Local model weights (downloaded on setup, never committed — see README_tts.md)
 models/
 *.onnx
+
+# macOS Finder metadata
+.DS_Store
