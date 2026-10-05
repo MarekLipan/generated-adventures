@@ -378,7 +378,7 @@ def _generate_scene_image_sync(
     assets: dict[str, Asset] = None,
     visible_asset_ids: List[str] = None,
     art_style: Optional[str] = None,
-    subject_directions: Optional[List[str]] = None,
+    subject_directions: Optional[dict[str, str]] = None,
 ) -> pathlib.Path | None:
     """Synchronous helper to generate a scene image.
 
@@ -654,7 +654,7 @@ Skills should match the character's background, stats, and archetype.
 
     # Build final character list with image paths
     for concept, (char_name, image_file_path) in zip(generated_concepts, image_results):
-        if isinstance(image_file_path, Exception):
+        if isinstance(image_file_path, BaseException):
             logger.error(
                 f"Image generation failed for {concept.name}: {image_file_path}"
             )
@@ -1045,10 +1045,10 @@ async def generate_hero(
         lore_task, portrait_task, return_exceptions=True
     )
 
-    if isinstance(lore, Exception):
+    if isinstance(lore, BaseException):
         logger.error(f"Hero lore generation failed: {lore}")
         raise lore
-    if isinstance(image_file_path, Exception):
+    if isinstance(image_file_path, BaseException):
         logger.error(f"Hero portrait generation failed: {image_file_path}")
         image_file_path = None
 
@@ -2680,10 +2680,10 @@ Make the scene immersive, clear, and exciting!
     )
 
     # Handle exceptions
-    if isinstance(image_file_path, Exception):
+    if isinstance(image_file_path, BaseException):
         logger.error(f"Image generation failed: {image_file_path}")
         image_file_path = None
-    if isinstance(voiceover_file_path, Exception):
+    if isinstance(voiceover_file_path, BaseException):
         logger.error(f"Voiceover generation failed: {voiceover_file_path}")
         voiceover_file_path = None
 
@@ -2932,10 +2932,10 @@ Continue the adventure!
     )
 
     # Handle exceptions
-    if isinstance(image_file_path, Exception):
+    if isinstance(image_file_path, BaseException):
         logger.error(f"Image generation failed: {image_file_path}")
         image_file_path = None
-    if isinstance(voiceover_file_path, Exception):
+    if isinstance(voiceover_file_path, BaseException):
         logger.error(f"Voiceover generation failed: {voiceover_file_path}")
         voiceover_file_path = None
 
@@ -2995,7 +2995,7 @@ async def generate_scene_recap(
     for i, scene in enumerate(scenes[: current_scene_index + 1]):
         summary = f"**Scene {scene.id}:**\n{scene.text[:500]}..."
         if scene.prompt:
-            summary += f"\n*Player choice was needed here*"
+            summary += "\n*Player choice was needed here*"
         scene_summaries.append(summary)
 
     scenes_context = "\n\n".join(scene_summaries)

@@ -153,6 +153,11 @@ def test_health_change_caps_at_maximum():
     assert updated[0].maximum_health == 100
 
 
+def _item_names(character) -> list[str]:
+    """Inventory holds structured InventoryItem objects; compare by name."""
+    return [item.name for item in character.inventory]
+
+
 def test_inventory_changes():
     """Test that inventory additions and removals work correctly."""
     char = Character(
@@ -196,10 +201,11 @@ def test_inventory_changes():
     updated = _apply_character_updates([char], scene)
 
     # Verify inventory updated correctly
-    assert "Magic Amulet" in updated[0].inventory
-    assert "Rope" not in updated[0].inventory
-    assert "Dagger" in updated[0].inventory  # unchanged items remain
-    assert "Torch" in updated[0].inventory
+    names = _item_names(updated[0])
+    assert "Magic Amulet" in names
+    assert "Rope" not in names
+    assert "Dagger" in names  # unchanged items remain
+    assert "Torch" in names
 
 
 def test_no_changes():
@@ -240,7 +246,7 @@ def test_no_changes():
 
     # Verify nothing changed
     assert updated[0].current_health == 75
-    assert updated[0].inventory == ["Axe", "Armor"]
+    assert _item_names(updated[0]) == ["Axe", "Armor"]
     assert updated[0].skills == ["Intimidation"]
     assert updated[0].strength == 17
 

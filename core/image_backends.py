@@ -208,7 +208,7 @@ class GeminiImageGenerator(ImageGenerator):
                     )
 
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-image-preview",
+                model=settings.GEMINI_IMAGE_MODEL,
                 contents=content_parts,
             )
 
@@ -264,7 +264,7 @@ class GeminiImageGenerator(ImageGenerator):
             )
 
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-image-preview",
+                model=settings.GEMINI_IMAGE_MODEL,
                 contents=content_parts,
                 config=config,
             )
@@ -438,7 +438,6 @@ class FluxKontextImageGenerator(ImageGenerator):
 
     def _load_gguf_pipeline(self, pipeline_cls):
         """Load pipeline using pre-quantized GGUF files for transformer and T5."""
-        import torch
         from diffusers import FluxTransformer2DModel
         from diffusers.quantizers.quantization_config import GGUFQuantizationConfig
         from huggingface_hub import hf_hub_download
@@ -941,7 +940,6 @@ class FluxKleinImageGenerator(ImageGenerator):
         """
         import gc
 
-        import torch
         from diffusers import BitsAndBytesConfig as DiffusersBnbConfig
         from diffusers import Flux2Transformer2DModel
         from transformers import AutoModel

@@ -6,8 +6,8 @@ backend that keeps characters consistent across scenes via reference images.
 Quick start (one-time setup):
     pip install -e ".[local-image]"
 
-Then run:
-    python test_image_generation.py
+Then run, from the repository root:
+    uv run python scripts/image_quality_check.py
 
 The most important tests are:
   #3 — single-character consistency (portrait → scene)
@@ -38,8 +38,8 @@ for _stream in (sys.stdout, sys.stderr):
 # Ensure the project root is on the path when running this script directly.
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from core.config import settings
-from core.image_backends import get_image_generator
+from core.config import settings  # noqa: E402 - needs the sys.path fix above
+from core.image_backends import get_image_generator  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -394,10 +394,10 @@ def test_klein_portrait_and_scene():
         reference_images=[portrait_path],
     )
     if result:
-        logger.info(f"✅ SUCCESS! Compare to FLUX.1 Kontext test 3 output:")
+        logger.info("✅ SUCCESS! Compare to FLUX.1 Kontext test 3 output:")
         logger.info(f"   Klein portrait: {portrait_path.name}")
         logger.info(f"   Klein scene:    {scene_path.name}")
-        logger.info(f"   Kontext scene:  scene_with_reference_elara_temple.png")
+        logger.info("   Kontext scene:  scene_with_reference_elara_temple.png")
     else:
         logger.error("❌ Klein scene generation failed")
     return result
@@ -452,9 +452,9 @@ def test_klein_multi_character():
     )
 
     if result:
-        logger.info(f"✅ SUCCESS! Compare to FLUX.1 Kontext party scene (test 5):")
+        logger.info("✅ SUCCESS! Compare to FLUX.1 Kontext party scene (test 5):")
         logger.info(f"   Klein scene:   {scene_path.name}")
-        logger.info(f"   Kontext scene: party_action_scene.png")
+        logger.info("   Kontext scene: party_action_scene.png")
         logger.info("   Check: do characters resemble their Klein portraits more than in Kontext?")
     else:
         logger.error("❌ Klein multi-character scene generation failed")

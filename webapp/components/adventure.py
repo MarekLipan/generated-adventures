@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from nicegui import ui
 
@@ -8,6 +9,8 @@ from webapp.utils import show_api_error, show_loading  # type: ignore
 from .character_changes import render_character_changes  # type: ignore
 from .character_display import render_character_cards  # type: ignore
 from .recap import show_recap_dialog  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 
 def render_scene_navigation(game_state, scene_index, render_scene_callback):
@@ -218,6 +221,9 @@ async def start_adventure(main_container, game_id: str):
 
         # Get game state for scenario name and all scenes
         game_state = game_flow.get_game_state(game_id)
+        if not game_state:
+            logger.error(f"No game state found for game {game_id} in render_scene")
+            return
 
         # Determine if this is a historical scene or the current scene
         is_current_scene = (

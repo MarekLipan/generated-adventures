@@ -64,5 +64,34 @@ packages = ["core", "webapp"]
 
 [dependency-groups]
 dev = [
+    "pyrefly>=1.3.2",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project is not installed as a package yet (no [build-system]), so make
+# `core`/`webapp` importable from the repo root.
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+    "live: calls a real external API and needs credentials; run with `pytest -m live`",
+]
+# Live tests cost money and need network access, so they are opt-in.
+addopts = "-m 'not live'"
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# Ruff's defaults: real errors only (undefined names, unused imports, syntax).
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pyrefly]
+project-includes = ["core", "webapp", "tests", "scripts", "image_server.py"]
+preset = "default"
+# Errors present when type checking was adopted. CI fails only on errors that
+# are not in here; shrink it with `pyrefly check --prune-baseline` as you fix them.
+baseline = "pyrefly-baseline.json"

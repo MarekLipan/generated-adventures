@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # Installs the locked environment (Python from .python-version).
+      # --locked fails if uv.lock is out of date with pyproject.toml.
+      - name: Install
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # Fails only on type errors not recorded in pyrefly-baseline.json.
+      - name: Type check
+        run: uv run pyrefly check
+
+      # Live API tests are deselected by default (see [tool.pytest.ini_options]).
+      - name: Test
+        run: uv run pytest

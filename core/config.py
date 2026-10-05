@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # any reference photos, so player photos never leave the machine by accident.
     ALLOW_CLOUD_IMAGE_UPLOAD: bool = False
 
+    # Model id for IMAGE_PROVIDER="gemini". Preview ids are retired once a model
+    # graduates (gemini-2.5-flash-image-preview now returns 404), so this lives in
+    # config: a retirement is a one-line .env change, not a code change.
+    GEMINI_IMAGE_MODEL: str = "gemini-2.5-flash-image"
+
     # Load local image models from the on-disk HuggingFace cache only, without
     # contacting the Hub. True (default) once the models are downloaded: startup
     # is fully offline (no network waits), and — importantly — a transient Hub

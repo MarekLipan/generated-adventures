@@ -1,0 +1,627 @@
+{
+  "errors": [
+    {
+      "column": 36,
+      "path": "core/game.py",
+      "name": "bad-assignment",
+      "concise_description": "`str` is not assignable to attribute `art_style` with type `Literal['artstation_realism', 'painterly_hero']`",
+      "severity": "error"
+    },
+    {
+      "column": 65,
+      "path": "core/generator.py",
+      "name": "not-a-type",
+      "concise_description": "Expected a type form, got instance of `(iterable: Iterable[object], /) -> bool`",
+      "severity": "error"
+    },
+    {
+      "column": 32,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `assets` with type `dict[str, Asset]`",
+      "severity": "error"
+    },
+    {
+      "column": 36,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `visible_asset_ids` with type `list[str]`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "core/generator.py",
+      "name": "not-iterable",
+      "concise_description": "Type `BaseException` is not iterable",
+      "severity": "error"
+    },
+    {
+      "column": 40,
+      "path": "core/generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | None` is not assignable to parameter `*args` with type `PathLike[str] | str` in function `pathlib.Path.__new__`",
+      "severity": "error"
+    },
+    {
+      "column": 22,
+      "path": "core/generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | None` is not assignable to parameter `*args` with type `PathLike[str] | str` in function `pathlib.Path.__new__`",
+      "severity": "error"
+    },
+    {
+      "column": 67,
+      "path": "core/generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | None` is not assignable to parameter `*args` with type `PathLike[str] | str` in function `pathlib.Path.__new__`",
+      "severity": "error"
+    },
+    {
+      "column": 36,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `visible_asset_ids` with type `list[str]`",
+      "severity": "error"
+    },
+    {
+      "column": 28,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `health_changes` with type `list[Unknown]`",
+      "severity": "error"
+    },
+    {
+      "column": 31,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `inventory_changes` with type `list[Unknown]`",
+      "severity": "error"
+    },
+    {
+      "column": 27,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `skill_changes` with type `list[Unknown]`",
+      "severity": "error"
+    },
+    {
+      "column": 26,
+      "path": "core/generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `stat_changes` with type `list[Unknown]`",
+      "severity": "error"
+    },
+    {
+      "column": 33,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "No attribute `LANCZOS` in module `PIL.Image`",
+      "severity": "error"
+    },
+    {
+      "column": 64,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "No attribute `LANCZOS` in module `PIL.Image`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Part` is not assignable to parameter `object` with type `str` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 26,
+      "path": "core/image_backends.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[str]` is not assignable to parameter `contents` with type `Content | File | Image | Part | list[Content | File | Image | Part | list[File | Image | Part | str | FileDict | PartDict] | str | ContentDict | FileDict | PartDict] | list[File | Image | Part | str | FileDict | PartDict] | str | ContentDict | FileDict | PartDict` in function `google.genai.models.Models.generate_content`",
+      "severity": "error"
+    },
+    {
+      "column": 29,
+      "path": "core/image_backends.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Part` is not assignable to parameter `object` with type `str` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 26,
+      "path": "core/image_backends.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[str]` is not assignable to parameter `contents` with type `Content | File | Image | Part | list[Content | File | Image | Part | list[File | Image | Part | str | FileDict | PartDict] | str | ContentDict | FileDict | PartDict] | list[File | Image | Part | str | FileDict | PartDict] | str | ContentDict | FileDict | PartDict` in function `google.genai.models.Models.generate_content`",
+      "severity": "error"
+    },
+    {
+      "column": 34,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `transformer`",
+      "severity": "error"
+    },
+    {
+      "column": 32,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `transformer`",
+      "severity": "error"
+    },
+    {
+      "column": 17,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `enable_model_cpu_offload`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `enable_sequential_cpu_offload`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `enable_model_cpu_offload`",
+      "severity": "error"
+    },
+    {
+      "column": 33,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `to`",
+      "severity": "error"
+    },
+    {
+      "column": 29,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `to`",
+      "severity": "error"
+    },
+    {
+      "column": 17,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `enable_attention_slicing`",
+      "severity": "error"
+    },
+    {
+      "column": 17,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `vae`",
+      "severity": "error"
+    },
+    {
+      "column": 21,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `vae`",
+      "severity": "error"
+    },
+    {
+      "column": 21,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `vae`",
+      "severity": "error"
+    },
+    {
+      "column": 23,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 12,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `dict` has no attribute `in_channels`",
+      "severity": "error"
+    },
+    {
+      "column": 13,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `dict` has no attribute `in_channels`",
+      "severity": "error"
+    },
+    {
+      "column": 35,
+      "path": "core/image_backends.py",
+      "name": "bad-assignment",
+      "concise_description": "`Image` is not assignable to dict key `image` with type `Generator | float | int | str`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 71,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "No attribute `LANCZOS` in module `PIL.Image`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `enable_sequential_cpu_offload`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `enable_model_cpu_offload`",
+      "severity": "error"
+    },
+    {
+      "column": 33,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `to`",
+      "severity": "error"
+    },
+    {
+      "column": 29,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `to`",
+      "severity": "error"
+    },
+    {
+      "column": 23,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 19,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `vae`",
+      "severity": "error"
+    },
+    {
+      "column": 13,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `vae`",
+      "severity": "error"
+    },
+    {
+      "column": 17,
+      "path": "core/image_backends.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `vae`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 34,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 22,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "core/image_backends.py",
+      "name": "not-callable",
+      "concise_description": "Expected a callable, got `None`",
+      "severity": "error"
+    },
+    {
+      "column": 9,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `TextIO` has no attribute `reconfigure`",
+      "severity": "error"
+    },
+    {
+      "column": 79,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "No attribute `LANCZOS` in module `PIL.Image`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "scripts/image_quality_check.py",
+      "name": "bad-assignment",
+      "concise_description": "`Path | str` is not assignable to `Path`",
+      "severity": "error"
+    },
+    {
+      "column": 20,
+      "path": "scripts/image_quality_check.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | str` is not assignable to parameter `prompt` with type `str` in function `core.image_backends.ImageGenerator.generate_character_image`",
+      "severity": "error"
+    },
+    {
+      "column": 16,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `str` has no attribute `exists`",
+      "severity": "error"
+    },
+    {
+      "column": 23,
+      "path": "scripts/image_quality_check.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[Path | str]` is not assignable to parameter `portrait_paths` with type `list[Path]` in function `_build_party_grid`",
+      "severity": "error"
+    },
+    {
+      "column": 16,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `str` has no attribute `exists`",
+      "severity": "error"
+    },
+    {
+      "column": 40,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `str` has no attribute `name`",
+      "severity": "error"
+    },
+    {
+      "column": 26,
+      "path": "scripts/image_quality_check.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[Path | str]` is not assignable to parameter `reference_images` with type `list[Path] | None` in function `core.image_backends.ImageGenerator.generate_scene_image`",
+      "severity": "error"
+    },
+    {
+      "column": 52,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `str` has no attribute `name`",
+      "severity": "error"
+    },
+    {
+      "column": 52,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `str` has no attribute `name`",
+      "severity": "error"
+    },
+    {
+      "column": 16,
+      "path": "scripts/image_quality_check.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | str` is not assignable to parameter `prompt` with type `str` in function `core.image_backends.FluxKleinImageGenerator.generate_character_image`",
+      "severity": "error"
+    },
+    {
+      "column": 58,
+      "path": "scripts/image_quality_check.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `Path` has no attribute `split`",
+      "severity": "error"
+    },
+    {
+      "column": 24,
+      "path": "scripts/image_quality_check.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Path | str` is not assignable to parameter `prompt` with type `str` in function `core.image_backends.FluxKleinImageGenerator.generate_character_image`",
+      "severity": "error"
+    },
+    {
+      "column": 64,
+      "path": "webapp/components/adventure.py",
+      "name": "unsupported-operation",
+      "concise_description": "Cannot set item in `dict[str | Unknown, Number]`",
+      "severity": "error"
+    },
+    {
+      "column": 64,
+      "path": "webapp/components/adventure.py",
+      "name": "unsupported-operation",
+      "concise_description": "Cannot set item in `dict[str | Unknown, Number]`",
+      "severity": "error"
+    },
+    {
+      "column": 40,
+      "path": "webapp/components/adventure.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `value`",
+      "severity": "error"
+    },
+    {
+      "column": 38,
+      "path": "webapp/components/adventure.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str | Unknown | None` is not assignable to parameter `player_action` with type `str` in function `webapp.services.game_flow.advance_scene`",
+      "severity": "error"
+    },
+    {
+      "column": 65,
+      "path": "webapp/components/adventure.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `scenes`",
+      "severity": "error"
+    },
+    {
+      "column": 55,
+      "path": "webapp/components/character_display.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `game_id` with type `str`",
+      "severity": "error"
+    },
+    {
+      "column": 52,
+      "path": "webapp/main.py",
+      "name": "bad-argument-count",
+      "concise_description": "Expected 1 more positional argument",
+      "severity": "error"
+    },
+    {
+      "column": 71,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `game_id` with type `str`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 29,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Paragraph` is not assignable to parameter `object` with type `Image` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Table` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 21,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Table` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Table` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 15,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[Paragraph]` is not assignable to parameter `flowables` with type `list[Flowable]` in function `reportlab.platypus.doctemplate.SimpleDocTemplate.build`",
+      "severity": "error"
+    },
+    {
+      "column": 74,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `game_id` with type `str`",
+      "severity": "error"
+    },
+    {
+      "column": 67,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-function-definition",
+      "concise_description": "Default `None` is not assignable to parameter `game_id` with type `str`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Image` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Table` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    },
+    {
+      "column": 18,
+      "path": "webapp/utils/pdf_generator.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Spacer` is not assignable to parameter `object` with type `Paragraph` in function `list.append`",
+      "severity": "error"
+    }
+  ]
+}

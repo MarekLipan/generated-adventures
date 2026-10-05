@@ -1,81 +1,87 @@
-"""Test script for recap generation feature.
+"""generate_scene_recap: what reaches the prompt, output parsing, and the fallback.
 
-Note: This is a manual test script, not a unit test.
-For unit tests, mock the generator.generate_scene_recap() function.
+The LLM is replaced by a pydantic-ai FunctionModel, so these tests run offline.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, patch
+import json
 
-from core import generator, persistence
+import pytest
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.profiles import ModelProfile
 
-
-async def test_recap_with_mock():
-    """Test recap generation with mocked AI call (no API usage)."""
-    # Load the migrated glacier game
-    game_id = "147c9b95-35b8-4904-8c90-89dd48cc2eb2"
-    game_state = persistence.load_game(game_id)
-
-    if not game_state:
-        print(f"❌ Could not load game {game_id}")
-        return
-
-    print(f"✅ Loaded game with {len(game_state.scenes)} scenes")
-    print(f"   Scenario ID: {game_state.scenario_id}")
-    print(f"   Characters: {[c.name for c in game_state.characters]}")
-
-    # Load scenario
-    scenario_template = persistence.load_scenario_template(game_state.scenario_id)
-    if not scenario_template:
-        print(f"❌ Could not load scenario template {game_state.scenario_id}")
-        return
-
-    print(f"✅ Loaded scenario: {scenario_template.name}")
-
-    # Test generating recap for scene 3 (after some events have happened)
-    test_scene_index = 2  # Scene 3 (0-indexed)
-
-    print(f"\n🎭 Testing recap generation for scenes 1-{test_scene_index + 1}...")
-
-    # Mock the AI generation to avoid API calls
-    mock_recap = f"""## Previously in {scenario_template.name}...
-
-Your brave party of adventurers has ventured into the frozen wastes, seeking the legendary Fire-Wyrm's Egg. 
-Elder Theron warned you of the dangers ahead, and you've already faced treacherous ice bridges and deadly falls.
-
-**Current Status:**
-{chr(10).join(f"- {c.name}: {c.current_health}/{c.maximum_health} HP" for c in game_state.characters)}
-
-The glacier's secrets are slowly revealing themselves, but many dangers still lie ahead...
-"""
-
-    with patch.object(
-        generator, "generate_scene_recap", new=AsyncMock(return_value=mock_recap)
-    ):
-        try:
-            recap_text = await generator.generate_scene_recap(
-                game_id=game_state.id,
-                scenario_name=scenario_template.name,
-                scenes=game_state.scenes,
-                characters=game_state.characters,
-                current_scene_index=test_scene_index,
-            )
-
-            print(f"\n{'=' * 80}")
-            print("MOCKED RECAP (no API call made):")
-            print(f"{'=' * 80}")
-            print(recap_text)
-            print(f"{'=' * 80}\n")
-
-            print(f"✅ Recap generation test passed ({len(recap_text)} characters)")
-            print("✅ No API calls were made (mocked)")
-
-        except Exception as e:
-            print(f"❌ Error in recap test: {e}")
-            import traceback
-
-            traceback.print_exc()
+from core import generator
+from core.models import Scene
 
 
-if __name__ == "__main__":
-    asyncio.run(test_recap_with_mock())
+@pytest.fixture
+def fake_llm(monkeypatch):
+    """Route the generator's text model to a function; returns the captured prompts."""
+    prompts: list[str] = []
+
+    def install(reply):
+        def fn(messages, info):
+            prompts.append(messages[-1].parts[-1].content)
+            return reply()
+
+        # NativeOutput needs a model that advertises JSON-schema output.
+        model = FunctionModel(fn, profile=ModelProfile(supports_json_schema_output=True))
+        monkeypatch.setattr(generator, "_get_text_model", lambda: model)
+        return prompts
+
+    return install
+
+
+SCENES = [
+    Scene(id=1, text="The party crosses the frozen pass."),
+    Scene(id=2, text="An ice bridge cracks beneath them."),
+    Scene(id=3, text="They reach the wyrm's lair."),
+]
+
+
+async def _recap(characters, current_scene_index=1):
+    return await generator.generate_scene_recap(
+        game_id="g1",
+        scenario_name="The Frozen Pass",
+        scenes=SCENES,
+        characters=characters,
+        current_scene_index=current_scene_index,
+    )
+
+
+async def test_prompt_covers_scenes_up_to_current_only(fake_llm, make_character):
+    reply = {"recap_text": "So far...", "scene_summaries": []}
+    prompts = fake_llm(lambda: ModelResponse(parts=[TextPart(json.dumps(reply))]))
+
+    await _recap([make_character("Lyra", current_health=80)])
+
+    (prompt,) = prompts
+    assert "frozen pass" in prompt and "ice bridge" in prompt
+    assert "wyrm's lair" not in prompt  # scene 3 is after the current scene
+    assert "**Lyra**: HP 80/100" in prompt
+
+
+async def test_returns_parsed_model_output(fake_llm, make_character):
+    reply = {
+        "recap_text": "Previously, the party braved the pass.",
+        "scene_summaries": [{"scene_id": 1, "summary": "Crossed the pass."}],
+    }
+    fake_llm(lambda: ModelResponse(parts=[TextPart(json.dumps(reply))]))
+
+    recap = await _recap([make_character()])
+
+    assert recap.recap_text == reply["recap_text"]
+    assert [(s.scene_id, s.summary) for s in recap.scene_summaries] == [(1, "Crossed the pass.")]
+
+
+async def test_falls_back_when_model_fails(fake_llm, make_character):
+    def boom():
+        raise RuntimeError("model unavailable")
+
+    fake_llm(boom)
+
+    recap = await _recap([make_character("Lyra")])
+
+    assert "The Frozen Pass" in recap.recap_text
+    assert "Lyra" in recap.recap_text
+    assert [s.scene_id for s in recap.scene_summaries] == [1, 2]
