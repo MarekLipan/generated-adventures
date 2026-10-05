@@ -9,7 +9,7 @@ The game narrates each scene with a text-to-speech backend, selected by
 | `gemini` | Paid, cloud | API | Google Gemini TTS. Expressive; requires `GOOGLE_API_KEY`. |
 | `none` | — | — | Disables narration. |
 
-Backends live in [`tts_backends.py`](src/generated_adventures/core/tts_backends.py) and all emit a
+Backends live in [`tts_backends.py`](../src/generated_adventures/core/tts_backends.py) and all emit a
 24 kHz / 16-bit / mono WAV, which the web UI plays back.
 
 ## Kokoro setup (default)

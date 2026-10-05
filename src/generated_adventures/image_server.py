@@ -17,7 +17,7 @@ Key design points for a single-GPU box:
     pay the one-time quantization / CUDA-autotune cost.
 
 LAN access: IMAGE_SERVER_HOST defaults to 0.0.0.0 (all interfaces). Point a client
-at http://<this-machine-ip>:<port>. See README_image_server.md for finding your
+at http://<this-machine-ip>:<port>. See docs/image-server.md for finding your
 address and opening the Windows firewall port.
 """
 

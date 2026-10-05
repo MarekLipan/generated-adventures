@@ -10,7 +10,7 @@ Choose with `IMAGE_PROVIDER` in `.env` (start from `.env.example`):
 |---|---|---|
 | `flux-klein` (default) | Your NVIDIA GPU or Apple Silicon | Free. Takes multiple reference images natively, so characters stay consistent across scenes. |
 | `gemini` | Google's API | No GPU needed, but image generation requires a billing-enabled key. |
-| `http` | Another machine running `image_server.py` | Lets a laptop use a desktop GPU over the LAN. See [README_image_server.md](README_image_server.md). |
+| `http` | Another machine running `image_server.py` | Lets a laptop use a desktop GPU over the LAN. See [docs/image-server.md](docs/image-server.md). |
 
 **First run with `flux-klein`:** the model (~32 GB) is gated on Hugging Face.
 Accept its license on the [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B),

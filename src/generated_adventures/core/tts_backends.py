@@ -119,7 +119,7 @@ class KokoroTTSGenerator(TTSGenerator):
         if not model_path.exists() or not voices_path.exists():
             raise FileNotFoundError(
                 f"Kokoro model files not found: {model_path} / {voices_path}. "
-                "Download them into models/kokoro/ (see README_tts.md)."
+                "Download them into models/kokoro/ (see docs/narration.md)."
             )
 
         logger.info(f"Loading Kokoro TTS (voice='{settings.KOKORO_VOICE}')...")
