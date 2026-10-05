@@ -651,12 +651,14 @@ Skills should match the character's background, stats, and archetype.
     logger.info("All image generation tasks completed")
 
     # Build final character list with image paths
-    for concept, (char_name, image_file_path) in zip(generated_concepts, image_results):
-        if isinstance(image_file_path, BaseException):
-            logger.error(
-                f"Image generation failed for {concept.name}: {image_file_path}"
-            )
+    for concept, result in zip(generated_concepts, image_results, strict=True):
+        # A failed task comes back as the exception itself, not a (name, path)
+        # tuple, so check before unpacking: one bad portrait must not sink the party.
+        if isinstance(result, BaseException):
+            logger.error(f"Image generation failed for {concept.name}: {result}")
             image_file_path = None
+        else:
+            _, image_file_path = result
 
         new_char = Character(
             name=concept.name,
@@ -2990,7 +2992,7 @@ async def generate_scene_recap(
 
     # Build scene summaries for context
     scene_summaries = []
-    for i, scene in enumerate(scenes[: current_scene_index + 1]):
+    for scene in scenes[: current_scene_index + 1]:
         summary = f"**Scene {scene.id}:**\n{scene.text[:500]}..."
         if scene.prompt:
             summary += "\n*Player choice was needed here*"

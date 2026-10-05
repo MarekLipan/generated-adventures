@@ -128,7 +128,7 @@ async def show_recap_dialog(game_state: models.Game, current_scene_index: int):
         ui.label("🎭 Your Journey So Far").classes("text-h6 mb-4 fantasy-text-gold")
 
         with ui.column().classes("w-full gap-4"):
-            for i, scene in enumerate(game_state.scenes[: current_scene_index + 1]):
+            for scene in game_state.scenes[: current_scene_index + 1]:
                 with ui.card().classes("bg-slate-800/30 p-4"):
                     # Scene header
                     ui.label(f"Scene {scene.id}").classes(

@@ -5,32 +5,10 @@ The LLM is replaced by a pydantic-ai FunctionModel, so these tests run offline.
 
 import json
 
-import pytest
 from pydantic_ai.messages import ModelResponse, TextPart
-from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.profiles import ModelProfile
 
 from core import generator
 from core.models import Scene
-
-
-@pytest.fixture
-def fake_llm(monkeypatch):
-    """Route the generator's text model to a function; returns the captured prompts."""
-    prompts: list[str] = []
-
-    def install(reply):
-        def fn(messages, info):
-            prompts.append(messages[-1].parts[-1].content)
-            return reply()
-
-        # NativeOutput needs a model that advertises JSON-schema output.
-        model = FunctionModel(fn, profile=ModelProfile(supports_json_schema_output=True))
-        monkeypatch.setattr(generator, "_get_text_model", lambda: model)
-        return prompts
-
-    return install
-
 
 SCENES = [
     Scene(id=1, text="The party crosses the frozen pass."),

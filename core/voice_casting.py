@@ -77,7 +77,11 @@ def cast_voice(
         pool = FEMALE_VOICES
     else:
         # Unknown: interleave so alternating unknown speakers still differ.
-        pool = [v for pair in zip(MALE_VOICES, FEMALE_VOICES) for v in pair]
+        # zip stops at the shorter list (5 male, 7 female), so the last two female
+        # voices are left out. Keep it that way: minor speakers aren't persisted
+        # and are cast by hash(name) % len(pool), so growing the pool would change
+        # the voices of recurring speakers in existing saves.
+        pool = [v for pair in zip(MALE_VOICES, FEMALE_VOICES, strict=False) for v in pair]
 
     taken_set = set(taken or ())
     if exclude:

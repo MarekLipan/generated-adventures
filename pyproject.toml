@@ -88,7 +88,12 @@ select = [
     "E4", "E7", "E9", "F",  # ruff's defaults: real errors (undefined names, syntax)
     "I",                    # import sorting
     "UP",                   # modern syntax for the target Python version
+    "B",                    # bugbear: likely bugs and design problems
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares request parameters through call defaults by design.
+extend-immutable-calls = ["fastapi.File"]
 
 [tool.pyrefly]
 project-includes = ["core", "webapp", "tests", "scripts", "image_server.py"]

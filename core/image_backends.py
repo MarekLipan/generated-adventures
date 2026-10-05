@@ -834,7 +834,7 @@ class FluxKleinImageGenerator(ImageGenerator):
 
         if directions:
             layout = " ".join(
-                f"On the {slot}: {d}." for slot, d in zip(slots, directions)
+                f"On the {slot}: {d}." for slot, d in zip(slots, directions, strict=True)
             )
             base_prompt = (
                 f"{prompt}. Place the characters exactly as follows, each clearly "
@@ -877,7 +877,7 @@ class FluxKleinImageGenerator(ImageGenerator):
             return canvas
 
         strength = float(settings.IMAGE_COMPOSITE_STRENGTH)
-        for i, (ref, box) in enumerate(zip(refs, self._subject_regions(n, width, height)), 1):
+        for i, (ref, box) in enumerate(zip(refs, self._subject_regions(n, width, height), strict=True), 1):
             mask = Image.new("L", (width, height), 0)
             ImageDraw.Draw(mask).rectangle(box, fill=255)
             # Feather the mask so the repainted region blends with the plate.
