@@ -781,6 +781,40 @@ class FluxKleinImageGenerator(ImageGenerator):
                 logger.info("✓ FLUX.2 Klein pipeline ready")
                 return
 
+            # GGUF fast path (the MPS counterpart to bitsandbytes above). A
+            # quantized transformer plus the bf16 encoder fits in 32 GB, so the
+            # pipeline runs fully resident and skips the offload paging that
+            # dominates the bf16 path on unified memory.
+            if settings.FLUX_KLEIN_GGUF_TRANSFORMER:
+                try:
+                    self.pipe = self._load_klein_gguf_pipeline(
+                        Flux2KleinPipeline, hf_token
+                    )
+                    try:
+                        self.pipe = self.pipe.to(self.device)
+                        self.cpu_offload_enabled = False
+                        logger.info(
+                            "✓ Klein GGUF pipeline resident on "
+                            f"{self.device} (no CPU offload)"
+                        )
+                    except Exception as place_err:
+                        # Smaller machine than expected — fall back to offload
+                        # rather than dying, still with the small transformer.
+                        logger.warning(
+                            f"Direct {self.device} placement failed ({place_err}); "
+                            "enabling model CPU offload"
+                        )
+                        self.pipe.enable_model_cpu_offload(device=self.device)
+                        self.cpu_offload_enabled = True
+                    self._finalize_vae()
+                    logger.info("✓ FLUX.2 Klein pipeline ready (GGUF)")
+                    return
+                except Exception as gguf_err:
+                    logger.warning(
+                        f"Klein GGUF load failed ({gguf_err}); "
+                        "falling back to bfloat16 pipeline"
+                    )
+
             # Fallback path: full bfloat16 pipeline with CPU offload.
             self.pipe = Flux2KleinPipeline.from_pretrained(
                 settings.FLUX_KLEIN_MODEL,
@@ -832,6 +866,59 @@ class FluxKleinImageGenerator(ImageGenerator):
                 "  pip install -U diffusers\n"
                 f"Error: {e}"
             ) from e
+
+    def _load_klein_gguf_pipeline(self, pipeline_cls, hf_token):
+        """Assemble Klein with a pre-quantized GGUF transformer.
+
+        Only the transformer is quantized — the published GGUF repos do not
+        ship the Qwen3-8B encoder — so the encoder, VAE and tokenizer come from
+        the original repo at bf16.
+        """
+        import os
+
+        from diffusers import Flux2Transformer2DModel
+        from diffusers.quantizers.quantization_config import GGUFQuantizationConfig
+        from huggingface_hub import hf_hub_download
+
+        t_repo, t_file = settings.FLUX_KLEIN_GGUF_TRANSFORMER.split(":", 1)
+        offline = settings.IMAGE_HF_OFFLINE
+
+        logger.info(f"Loading Klein GGUF transformer: {t_file} from {t_repo}")
+        transformer_path = hf_hub_download(
+            repo_id=t_repo, filename=t_file, token=hf_token, local_files_only=offline
+        )
+        # from_single_file needs the transformer subfolder config, not the
+        # pipeline root. Resolve it out of the local cache.
+        config_dir = os.path.dirname(
+            hf_hub_download(
+                repo_id=settings.FLUX_KLEIN_MODEL,
+                filename="transformer/config.json",
+                token=hf_token,
+                local_files_only=offline,
+            )
+        )
+        transformer = Flux2Transformer2DModel.from_single_file(
+            transformer_path,
+            quantization_config=GGUFQuantizationConfig(compute_dtype=self.torch_dtype),
+            torch_dtype=self.torch_dtype,
+            config=config_dir,
+            token=hf_token,
+        )
+        logger.info(
+            f"✓ Klein GGUF transformer loaded (in_channels="
+            f"{getattr(transformer.config, 'in_channels', '?')})"
+        )
+
+        logger.info("Assembling Klein pipeline (encoder + VAE from original repo)...")
+        pipe = pipeline_cls.from_pretrained(
+            settings.FLUX_KLEIN_MODEL,
+            transformer=transformer,
+            torch_dtype=self.torch_dtype,
+            token=hf_token,
+            local_files_only=offline,
+        )
+        logger.info("✓ Klein GGUF pipeline assembled")
+        return pipe
 
     def _load_bnb_pipeline(self, pipeline_cls, klein_quant: str, hf_token):
         """Load Klein with bitsandbytes-quantized transformer + text encoder.
@@ -934,6 +1021,32 @@ class FluxKleinImageGenerator(ImageGenerator):
         except Exception:
             return torch.Generator()
 
+    def _scene_size(self) -> tuple:
+        """(width, height) for a scene render, trimmed on MPS.
+
+        Unified-memory Macs pay a full attention allocation with no flash
+        kernel, so a smaller canvas cuts peak memory sharply. CUDA keeps the
+        full size.
+        """
+        if self.device == "mps":
+            return (
+                settings.FLUX_KLEIN_MPS_SCENE_WIDTH,
+                settings.FLUX_KLEIN_MPS_SCENE_HEIGHT,
+            )
+        return settings.FLUX_KLEIN_SCENE_WIDTH, settings.FLUX_KLEIN_SCENE_HEIGHT
+
+    def _portrait_size(self) -> tuple:
+        """(width, height) for a character portrait, trimmed on MPS."""
+        if self.device == "mps":
+            return (
+                settings.FLUX_KLEIN_MPS_PORTRAIT_WIDTH,
+                settings.FLUX_KLEIN_MPS_PORTRAIT_HEIGHT,
+            )
+        return (
+            settings.FLUX_KLEIN_PORTRAIT_WIDTH,
+            settings.FLUX_KLEIN_PORTRAIT_HEIGHT,
+        )
+
     def _device_vram_gb(self) -> Optional[float]:
         """Total VRAM of the active accelerator in GB, or None if unknown.
 
@@ -965,6 +1078,7 @@ class FluxKleinImageGenerator(ImageGenerator):
         """
         try:
             suffix = self._style_suffix(art_style)
+            portrait_w, portrait_h = self._portrait_size()
             ref = None
             if reference_images:
                 p = pathlib.Path(reference_images[0])
@@ -985,8 +1099,8 @@ class FluxKleinImageGenerator(ImageGenerator):
                 prompt=enhanced_prompt,
                 guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
                 num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
-                height=1024,
-                width=768,
+                height=portrait_h,
+                width=portrait_w,
                 generator=self._make_generator(),
             )
             if ref is not None:
@@ -1009,6 +1123,7 @@ class FluxKleinImageGenerator(ImageGenerator):
     ) -> Optional[pathlib.Path]:
         try:
             suffix = self._style_suffix(art_style)
+            scene_w, scene_h = self._scene_size()
             if reference_images:
                 # MPS has no flash-attention kernel and materializes the full
                 # attention matrix in one allocation, so multiple 1024px
@@ -1056,8 +1171,8 @@ class FluxKleinImageGenerator(ImageGenerator):
                         image=refs,
                         guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
                         num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
-                        height=768,
-                        width=1024,
+                        height=scene_h,
+                        width=scene_w,
                         generator=self._make_generator(),
                     ).images[0]
             else:
@@ -1071,8 +1186,8 @@ class FluxKleinImageGenerator(ImageGenerator):
                         prompt=enhanced_prompt,
                         guidance_scale=settings.FLUX_KLEIN_GUIDANCE_SCALE,
                         num_inference_steps=settings.FLUX_KLEIN_NUM_INFERENCE_STEPS,
-                        height=768,
-                        width=1024,
+                        height=scene_h,
+                        width=scene_w,
                         generator=self._make_generator(),
                     ).images[0]
 

@@ -107,6 +107,20 @@ class Settings(BaseSettings):
     # slower or crash on the current torch/CUDA build; bitsandbytes has fast kernels.
     FLUX_KLEIN_QUANTIZATION: Literal["none", "nf4", "int8"] = "nf4"
 
+    # Pre-quantized GGUF transformer for Klein, as "repo_id:filename".
+    # Format matches FLUX_KONTEXT_GGUF_TRANSFORMER above.
+    #
+    # This is the MPS answer to what bitsandbytes does on CUDA. A bf16 Klein is
+    # ~17 GB transformer + ~15 GB Qwen3-8B encoder = ~32 GB, which does not fit
+    # a 32 GB Mac, so the pipeline falls back to CPU offload and pages weights
+    # every step (measured: 375-503 s/image). A GGUF transformer (Q4_K_M ~5.9 GB,
+    # Q2_K ~4.0 GB) brings the total to ~19-21 GB, which fits with the encoder
+    # resident — so offload is disabled entirely and the paging stops.
+    #
+    # Note the encoder stays bf16: the published GGUF repos quantize only the
+    # transformer. Leave empty to use the bf16 path (or the CUDA bnb path above).
+    FLUX_KLEIN_GGUF_TRANSFORMER: str = ""
+
     # Edge length each reference image is resized to before being fed to Klein
     # for MULTI-reference scenes (the floor used at the 3-reference tier; 1–2
     # references render larger — see generate_scene_image). Attention cost grows
@@ -126,6 +140,26 @@ class Settings(BaseSettings):
     # references OOM a 32 GB Mac (a single ~30 GB MTLBuffer); 512px fits with
     # headroom. This smaller size is used automatically when running on MPS.
     FLUX_KLEIN_MPS_REFERENCE_SIZE: int = 512
+
+    # Output resolution for Klein renders, as (width, height). Must stay
+    # divisible by 16 (VAE downsamples 8x, then the transformer patchifies 2x).
+    #
+    # Cost scales with the token count (w/16 * h/16), and the MPS attention
+    # allocation grows ~quadratically on top of that, so trimming the canvas is
+    # the cheapest lever available on a Mac. It does NOT reduce the weight
+    # paging that dominates a 32 GB machine (the 9B transformer and Qwen3-8B
+    # encoder are resident regardless), so expect a partial speedup, not a fix.
+    FLUX_KLEIN_SCENE_WIDTH: int = 1024
+    FLUX_KLEIN_SCENE_HEIGHT: int = 768
+    FLUX_KLEIN_PORTRAIT_WIDTH: int = 768
+    FLUX_KLEIN_PORTRAIT_HEIGHT: int = 1024
+    # Smaller canvas used automatically on MPS, same idea as the reference-size
+    # override above. 768x576 / 576x768 keeps the 4:3 framing at ~56% of the
+    # tokens. Raise these toward the CUDA values if renders look too soft.
+    FLUX_KLEIN_MPS_SCENE_WIDTH: int = 768
+    FLUX_KLEIN_MPS_SCENE_HEIGHT: int = 576
+    FLUX_KLEIN_MPS_PORTRAIT_WIDTH: int = 576
+    FLUX_KLEIN_MPS_PORTRAIT_HEIGHT: int = 768
 
     # Generation parameters
     IMAGE_NUM_INFERENCE_STEPS: int = 30  # Used by flux-kontext backend
