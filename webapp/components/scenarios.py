@@ -3,11 +3,11 @@ import logging
 
 from nicegui import ui
 
-from core.config import settings  # type: ignore
-from webapp.services import game_flow  # type: ignore
-from webapp.utils import show_api_error, show_loading  # type: ignore
+from core.config import settings
+from webapp.services import game_flow
+from webapp.utils import show_api_error, show_loading
 
-from .hero_creation import start_hero_creation  # type: ignore
+from .hero_creation import start_hero_creation
 
 logger = logging.getLogger()
 

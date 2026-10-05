@@ -195,7 +195,7 @@ class GeminiTTSGenerator(TTSGenerator):
     """Cloud narration via Google Gemini TTS."""
 
     def __init__(self, api_key: str):
-        from google import genai as genai_client  # type: ignore
+        from google import genai as genai_client
 
         if not api_key:
             raise ValueError("GOOGLE_API_KEY is required when TTS_PROVIDER='gemini'.")

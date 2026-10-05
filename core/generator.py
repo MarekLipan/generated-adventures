@@ -12,7 +12,7 @@ import re
 import threading
 from collections.abc import Callable
 
-from google.genai.errors import ClientError, ServerError  # type: ignore
+from google.genai.errors import ClientError, ServerError
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider

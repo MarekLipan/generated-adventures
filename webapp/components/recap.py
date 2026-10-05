@@ -4,8 +4,8 @@ import logging
 
 from nicegui import ui
 
-from core import generator, models  # type: ignore
-from webapp.services import game_flow  # type: ignore
+from core import generator, models
+from webapp.services import game_flow
 
 logger = logging.getLogger(__name__)
 

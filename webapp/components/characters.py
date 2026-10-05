@@ -4,9 +4,9 @@ import logging
 from nicegui import ui
 
 from core.models import Character
-from webapp.services import game_flow  # type: ignore
+from webapp.services import game_flow
 
-from .party import show_character_overview  # type: ignore
+from .party import show_character_overview
 
 logger = logging.getLogger()
 
@@ -46,7 +46,7 @@ async def show_characters(
                 scenario_name=scenario_name,
                 num_characters=6,
                 scenario_details=scenario_details,
-            )  # type: ignore
+            )
             logger.info(
                 f"Character generation complete: {len(all_characters)} characters"
             )

@@ -177,7 +177,7 @@ class GeminiImageGenerator(ImageGenerator):
     """Image generator using Google Gemini API."""
 
     def __init__(self, api_key: str):
-        from google import genai as genai_client  # type: ignore
+        from google import genai as genai_client
 
         self.client = genai_client.Client(api_key=api_key)
 

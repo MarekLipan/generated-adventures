@@ -3,12 +3,12 @@ import logging
 
 from nicegui import ui
 
-from webapp.services import game_flow  # type: ignore
-from webapp.utils import show_api_error, show_loading  # type: ignore
+from webapp.services import game_flow
+from webapp.utils import show_api_error, show_loading
 
-from .character_changes import render_character_changes  # type: ignore
-from .character_display import render_character_cards  # type: ignore
-from .recap import show_recap_dialog  # type: ignore
+from .character_changes import render_character_changes
+from .character_display import render_character_cards
+from .recap import show_recap_dialog
 
 logger = logging.getLogger(__name__)
 

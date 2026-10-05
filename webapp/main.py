@@ -9,13 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from nicegui import app as nicegui_app
 from nicegui import ui
 
-from core import generator  # type: ignore
-from webapp.services import game_flow  # type: ignore
+from core import generator
+from webapp.services import game_flow
 
-from .components.resume import resume_game  # type: ignore
+from .components.resume import resume_game
 
 # Component imports (UI flow steps)
-from .components.scenarios import show_scenarios  # type: ignore
+from .components.scenarios import show_scenarios
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 
 from core import game, generator, persistence
-from core.models import (  # type: ignore
+from core.models import (
     Character,
     Game,
     GeneratedArchetype,
@@ -25,7 +25,7 @@ PHOTO_DIR = pathlib.Path("webapp/static/photos")
 # --- Scenario management ----------------------------------------------------------
 
 
-async def get_scenario_pool() -> list[ScenarioTemplate]:  # type: ignore
+async def get_scenario_pool() -> list[ScenarioTemplate]:
     """Load all available scenario templates."""
     return persistence.load_all_scenario_templates()
 
@@ -42,7 +42,7 @@ def scenario_scale_options() -> dict[str, str]:
 
 async def generate_new_scenario(
     theme: str = "any", scale: str = "any"
-) -> ScenarioTemplate:  # type: ignore
+) -> ScenarioTemplate:
     """Generate a new scenario template, optionally steered to a genre and scale.
 
     Returns the newly created ScenarioTemplate.
@@ -71,7 +71,7 @@ def set_art_style(game_id: str, art_style: str) -> None:
     game.set_art_style(game_id, art_style)
 
 
-def get_scenario_for_game(game_id: str) -> ScenarioTemplate | None:  # type: ignore
+def get_scenario_for_game(game_id: str) -> ScenarioTemplate | None:
     """Get the scenario template for a game."""
     return game.get_scenario_from_game(game_id)
 
@@ -87,7 +87,7 @@ def create_new_game(players: int) -> str:
     return game.create_new_game(players)
 
 
-def get_game_state(game_id: str) -> Game | None:  # type: ignore
+def get_game_state(game_id: str) -> Game | None:
     return game.get_game_state(game_id)
 
 
@@ -105,7 +105,7 @@ async def generate_characters(
         scenario_name=scenario_name,
         num_characters=num_characters,
         scenario_details=scenario_details,
-    )  # type: ignore
+    )
 
 
 def add_character(game_id: str, character: Character) -> None:
@@ -145,7 +145,7 @@ async def generate_archetypes(
     scenario_details: str | None = None,
     num_archetypes: int = 5,
     scale: str = "any",
-) -> list[GeneratedArchetype]:  # type: ignore
+) -> list[GeneratedArchetype]:
     """Generate scenario-tailored hero archetypes for players to pick from."""
     return await generator.generate_archetypes(
         scenario_name=scenario_name,
@@ -174,7 +174,7 @@ def save_player_photo(
 async def generate_hero(
     game_id: str,
     scenario_name: str,
-    archetype: GeneratedArchetype,  # type: ignore
+    archetype: GeneratedArchetype,
     art_style: str,
     player_index: int,
     scenario_details: str | None = None,
@@ -182,7 +182,7 @@ async def generate_hero(
     custom_name: str | None = None,
     gender: str = "unspecified",
     scale: str = "any",
-) -> Character:  # type: ignore
+) -> Character:
     """Generate a single hero (lore + portrait) from a chosen archetype."""
     return await generator.generate_hero(
         game_id=game_id,
@@ -202,18 +202,18 @@ async def generate_hero(
 # --- Scenes / Adventure Loop ------------------------------------------------------
 
 
-def get_current_scene(game_id: str) -> Scene | None:  # type: ignore
+def get_current_scene(game_id: str) -> Scene | None:
     return game.get_current_scene(game_id)
 
 
-async def advance_scene(game_id: str, player_action: str) -> Scene | None:  # type: ignore
+async def advance_scene(game_id: str, player_action: str) -> Scene | None:
     return await game.advance_scene(game_id, player_action)
 
 
 # --- Game persistence -------------------------------------------------------------
 
 
-def load_game(game_id: str) -> Game | None:  # type: ignore
+def load_game(game_id: str) -> Game | None:
     """Load a saved game from disk into memory."""
     return game.load_game(game_id)
 

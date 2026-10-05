@@ -3,9 +3,9 @@ import logging
 
 from nicegui import ui
 
-from webapp.services import game_flow  # type: ignore
+from webapp.services import game_flow
 
-from .hero_creation import start_hero_creation  # type: ignore
+from .hero_creation import start_hero_creation
 
 logger = logging.getLogger()
 

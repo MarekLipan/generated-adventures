@@ -16,11 +16,11 @@ import re
 
 from nicegui import ui
 
-from webapp.services import game_flow  # type: ignore
-from webapp.utils import show_api_error, show_loading  # type: ignore
+from webapp.services import game_flow
+from webapp.utils import show_api_error, show_loading
 
 from .character_display import render_character_cards
-from .party import show_character_overview  # type: ignore
+from .party import show_character_overview
 
 logger = logging.getLogger()
 

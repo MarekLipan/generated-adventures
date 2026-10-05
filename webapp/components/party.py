@@ -3,9 +3,9 @@ import logging
 
 from nicegui import ui
 
-from webapp.services import game_flow  # type: ignore
+from webapp.services import game_flow
 
-from .adventure import start_adventure  # type: ignore
+from .adventure import start_adventure
 from .character_display import render_character_cards
 
 logger = logging.getLogger()
