@@ -133,6 +133,15 @@ docs/
 
 ## License
 
-The code is licensed under [Apache 2.0](LICENSE). The models it downloads have
-their own licenses; FLUX.2 Klein 9B, for example, is released under a
-non-commercial license.
+The code is licensed under [Apache 2.0](LICENSE).
+
+Third-party components keep their own licenses:
+
+- **Model weights.** FLUX.2 Klein 9B is released under a non-commercial license;
+  FLUX.2 Klein 4B is Apache 2.0 and can be selected with `FLUX_KLEIN_MODEL`.
+  Check each model's license before using it or its outputs commercially.
+- **Local narration.** The optional `local-tts` dependency group installs
+  Kokoro, which uses `phonemizer` and espeak-ng, both GPL-3.0. They are installed
+  as separate packages and not distributed with this repository; if you bundle
+  them into an application you distribute, GPL terms apply to that bundle.
+  Cloud-only setups (`--no-group local-tts`) don't install them.

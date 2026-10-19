@@ -3,6 +3,9 @@ name = "generated-adventures"
 version = "0.1.0"
 description = "A tabletop-style adventure game where an LLM runs the story, local diffusion models paint the scenes, and a local voice narrates."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Marek Lipan" }]
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.116.1",
